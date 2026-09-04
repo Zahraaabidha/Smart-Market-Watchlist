@@ -476,9 +476,17 @@ def market_source(request: Request) -> schemas.MarketSourceResponse:
 
 demo_router = APIRouter(prefix="/demo", tags=["demo"])
 
-# The replay window seeded for the in-app demo: the user "checked" this long
-# before now, was away, and returns to a populated brief.
-_DEMO_AWAY = timedelta(hours=3)
+# Candidate absence windows for the in-app demo, tried in order. The replay
+# series is deterministic per timestamp but which symbols are "interesting"
+# depends on where the wall clock currently sits, so the demo picks the first
+# window that actually surfaces a meaningful change (falling back to the first).
+_DEMO_AWAY_CANDIDATES = (
+    timedelta(hours=3),
+    timedelta(hours=4),
+    timedelta(hours=2),
+    timedelta(hours=5),
+    timedelta(hours=6),
+)
 _DEMO_BACKFILL = timedelta(hours=12)
 
 
@@ -490,12 +498,12 @@ def demo_replay(
 ) -> dict[str, str]:
     """Reproduce the product's core scenario for the signed-in user.
 
-    check (now - 3h) -> market moves -> return (now) -> brief explains it.
+    check (a few hours ago) -> market moves -> return (now) -> brief explains it.
 
     Deterministic in substance: the replay series is a pure function of
-    timestamp, so the same wall-clock window always yields the same shape of
-    swings and quiet names. Only meaningful for demo_mode; the router is not
-    mounted otherwise.
+    timestamp. The absence window is chosen from a fixed ordered list so the
+    demo reliably lands on a window that has something to explain. Only
+    meaningful in demo_mode; the router is not mounted otherwise.
     """
     watchlist = wl.list_watchlists(session, user)[0]
 
@@ -504,30 +512,46 @@ def demo_replay(
     for symbol in wl.DEFAULT_SYMBOLS:
         wl.add_item(session, user, watchlist.id, symbol)
     session.flush()
-
-    # A demo *reset*: drop this watchlist's checkpoints so the scenario window
-    # is exactly "3h ago", not whatever the account last marked as read. This
-    # is the one place checkpoints are deleted, it is scoped to the caller's
-    # own watchlist, and the route only exists in demo mode.
-    session.query(UserCheckpoint).filter(
-        UserCheckpoint.watchlist_id == watchlist.id
-    ).delete(synchronize_session=False)
-    session.flush()
+    watchlist = wl.get_owned_watchlist(session, user, watchlist.id)
 
     provider = ReplayProvider()
     symbols = [item.symbol for item in watchlist.items]
     backfill(session, provider, symbols, now, window=_DEMO_BACKFILL)
+    session.flush()
 
-    checked_at = now - _DEMO_AWAY
-    wl.record_checkpoint(
-        session, user, watchlist.id, checked_at, f"demo-{int(now.timestamp())}"
-    )
+    def _reset_checkpoints() -> None:
+        # A demo *reset*: drop this watchlist's checkpoints so the window is
+        # exactly the one we choose, not whatever the account last marked as
+        # read. The only place checkpoints are deleted, scoped to the caller's
+        # own watchlist, demo-mode only.
+        session.query(UserCheckpoint).filter(
+            UserCheckpoint.watchlist_id == watchlist.id
+        ).delete(synchronize_session=False)
+        session.flush()
+
+    chosen = _DEMO_AWAY_CANDIDATES[0]
+    for away in _DEMO_AWAY_CANDIDATES:
+        _reset_checkpoints()
+        wl.record_checkpoint(
+            session, user, watchlist.id, now - away, f"demo-{int(now.timestamp())}"
+        )
+        session.flush()
+        result = brief_service.build_brief(session, user, watchlist, now)
+        if result.attention:
+            chosen = away
+            break
+    else:
+        # None surfaced anything; keep the last (first-candidate) checkpoint.
+        _reset_checkpoints()
+        wl.record_checkpoint(
+            session, user, watchlist.id, now - chosen, f"demo-{int(now.timestamp())}"
+        )
+
     session.commit()
-
     return {
-        "checked_at": checked_at.isoformat(),
+        "checked_at": (now - chosen).isoformat(),
         "returned_at": now.isoformat(),
-        "away_for": str(_DEMO_AWAY),
+        "away_for": str(chosen),
     }
 
 

@@ -87,6 +87,37 @@ def test_network_error_raises_market_data_error() -> None:
         provider.fetch_current(["RELIANCE"], NOW)
 
 
+def test_api_key_is_sent_as_a_header_never_in_the_url() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(
+            200,
+            json={"X": {"symbol": "X", "close": "1.0", "datetime": "2026-09-04 09:59:00"}},
+        )
+
+    provider = TwelveDataProvider(api_key="SECRET123", client=_client(handler))
+    provider.fetch_current(["X"], NOW)
+
+    assert "SECRET123" not in str(seen["url"])
+    assert "apikey=" not in str(seen["url"])
+    assert seen["auth"] == "apikey SECRET123"
+
+
+def test_error_messages_never_contain_the_api_key() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="Unauthorized")
+
+    provider = TwelveDataProvider(api_key="SECRET123", client=_client(handler))
+    try:
+        provider.fetch_current(["X"], NOW)
+        raise AssertionError("expected MarketDataError")
+    except MarketDataError as exc:
+        assert "SECRET123" not in str(exc)
+
+
 def test_history_is_ascending_and_bounded_to_now() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

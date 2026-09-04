@@ -79,7 +79,9 @@ class TwelveDataProvider(MarketDataProvider):
             # A missing key is a configuration error, caught at construction
             # rather than surfacing as a confusing 401 on the first poll.
             raise ValueError("TwelveDataProvider requires an API key")
-        self.api_key = api_key
+        # Sent as a header, never a query parameter, so the key cannot leak into
+        # a URL, an access log, or an exception message.
+        self._headers = {"Authorization": f"apikey {api_key}"}
         self.exchange = exchange
         self._client = client or httpx.Client(timeout=_TIMEOUT)
 
@@ -91,7 +93,7 @@ class TwelveDataProvider(MarketDataProvider):
             return []
 
         quotes: list[Quote] = []
-        errors = 0
+        last_error: str | None = None
         for start in range(0, len(wanted), _MAX_BATCH):
             batch = wanted[start : start + _MAX_BATCH]
             try:
@@ -99,14 +101,16 @@ class TwelveDataProvider(MarketDataProvider):
                     "/quote",
                     {"symbol": ",".join(batch), "exchange": self.exchange},
                 )
-            except MarketDataError:
-                errors += 1
+            except MarketDataError as exc:
+                last_error = str(exc)
                 continue
             quotes.extend(self._quotes_from_payload(payload, batch))
 
         # Every batch failed and nothing came back: the caller must degrade.
-        if not quotes and errors:
-            raise MarketDataError("twelve data: no quotes returned for any symbol")
+        # Surface the vendor's own message (auth, quota, …) so the degraded
+        # badge can say *why*.
+        if not quotes and last_error is not None:
+            raise MarketDataError(last_error)
         return quotes
 
     def fetch_history(
@@ -152,18 +156,31 @@ class TwelveDataProvider(MarketDataProvider):
     # --- internals -------------------------------------------------------
 
     def _get(self, path: str, params: dict[str, object]) -> dict:
-        params = {**params, "apikey": self.api_key}
         try:
-            response = self._client.get(f"{_BASE_URL}{path}", params=params)
-            response.raise_for_status()
-            body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise MarketDataError(f"twelve data request failed: {exc}") from exc
+            response = self._client.get(
+                f"{_BASE_URL}{path}", params=params, headers=self._headers
+            )
+        except httpx.HTTPError as exc:
+            # str(exc) on httpx errors can include the request URL; report only
+            # the exception type so nothing from the request can leak.
+            raise MarketDataError(
+                f"twelve data request failed ({type(exc).__name__})"
+            ) from exc
 
-        # The API returns HTTP 200 with an error envelope for auth and quota
-        # problems, so the status code alone is not enough.
+        if response.status_code >= 400:
+            # Never str(exc)/response.text here — build the message from the
+            # status code alone.
+            raise MarketDataError(f"twelve data HTTP {response.status_code}")
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise MarketDataError("twelve data returned a non-JSON response") from exc
+
+        # The API also returns HTTP 200 with an error envelope for some quota
+        # and symbol problems, so the status code alone is not enough.
         if isinstance(body, dict) and body.get("status") == "error":
-            message = body.get("message", "unknown error")
+            message = str(body.get("message", "unknown error"))[:200]
             raise MarketDataError(f"twelve data error: {message}")
         return body if isinstance(body, dict) else {}
 

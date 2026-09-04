@@ -59,6 +59,9 @@ export function PricePathChart({ detail }: { detail: SymbolPathDetail }) {
       (v, i, a) => a.indexOf(v) === i,
     );
 
+    // evenly-spaced x-axis time ticks across the actual data span
+    const xticks = Array.from({ length: 5 }, (_, i) => t0 + (tSpan * i) / 4);
+
     return {
       pts,
       line,
@@ -74,6 +77,7 @@ export function PricePathChart({ detail }: { detail: SymbolPathDetail }) {
       endX: px(t1),
       endY: py(pts[pts.length - 1]?.v ?? 0),
       yticks,
+      xticks,
       t0,
       t1,
       rising: (pts[pts.length - 1]?.v ?? 0) >= checkpoint,
@@ -129,11 +133,13 @@ export function PricePathChart({ detail }: { detail: SymbolPathDetail }) {
           opacity={0.05}
         />
         <text
-          x={m.checkpointX + 6}
-          y={PAD.top + 12}
+          x={(m.checkpointX + (VB_W - PAD.right)) / 2}
+          y={PAD.top - 6}
+          textAnchor="middle"
           className="fill-ink-400"
           fontSize="10"
           fontWeight="600"
+          letterSpacing="0.5"
         >
           WHILE YOU WERE AWAY
         </text>
@@ -190,20 +196,22 @@ export function PricePathChart({ detail }: { detail: SymbolPathDetail }) {
           strokeLinecap="round"
         />
 
-        {/* extreme markers */}
+        {/* extreme markers — label flips inward when close to an edge */}
         <Marker
           x={m.px(m.pts[m.hiIdx].t)}
           y={m.py(m.pts[m.hiIdx].v)}
           label={`High ${price(String(m.hi))}`}
           color="#0f8a52"
-          place="above"
+          place={m.py(m.pts[m.hiIdx].v) < PAD.top + 24 ? "below" : "above"}
         />
         <Marker
           x={m.px(m.pts[m.loIdx].t)}
           y={m.py(m.pts[m.loIdx].v)}
           label={`Low ${price(String(m.lo))}`}
           color="#c8354a"
-          place="below"
+          place={
+            m.py(m.pts[m.loIdx].v) > VB_H - PAD.bottom - 24 ? "above" : "below"
+          }
         />
 
         {/* checkpoint dot + current dot */}
@@ -237,24 +245,22 @@ export function PricePathChart({ detail }: { detail: SymbolPathDetail }) {
           </g>
         )}
 
-        {/* x-axis end labels */}
-        <text
-          x={PAD.left}
-          y={VB_H - 8}
-          className="fill-ink-400"
-          fontSize="10"
-        >
-          {clockTime(detail.points[0]?.t ?? null)}
-        </text>
-        <text
-          x={VB_W - PAD.right}
-          y={VB_H - 8}
-          textAnchor="end"
-          className="fill-ink-400"
-          fontSize="10"
-        >
-          {clockTime(detail.points[detail.points.length - 1]?.t ?? null)}
-        </text>
+        {/* x-axis time ticks */}
+        {m.xticks.map((t, i) => {
+          const anchor = i === 0 ? "start" : i === m.xticks.length - 1 ? "end" : "middle";
+          return (
+            <text
+              key={t}
+              x={m.px(t)}
+              y={VB_H - 8}
+              textAnchor={anchor}
+              className="fill-ink-400"
+              fontSize="10"
+            >
+              {clockTime(new Date(t).toISOString())}
+            </text>
+          );
+        })}
       </svg>
 
       {hover && (
@@ -283,6 +289,11 @@ function Marker({
   place: "above" | "below";
 }) {
   const dy = place === "above" ? -10 : 16;
+  // Keep the label inside the plot area: anchor start/end near the edges.
+  const anchor: "start" | "middle" | "end" =
+    x < PAD.left + 60 ? "start" : x > VB_W - PAD.right - 60 ? "end" : "middle";
+  const labelX =
+    anchor === "start" ? x - 4 : anchor === "end" ? x + 4 : x;
   return (
     <g>
       <circle
@@ -294,9 +305,9 @@ function Marker({
         strokeWidth={1.75}
       />
       <text
-        x={x}
+        x={labelX}
         y={y + dy}
-        textAnchor="middle"
+        textAnchor={anchor}
         fontSize="10"
         fontWeight="600"
         fill={color}

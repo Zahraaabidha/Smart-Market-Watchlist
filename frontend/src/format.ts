@@ -1,4 +1,4 @@
-import type { Freshness, Severity } from "./types";
+import type { Freshness } from "./types";
 
 export function relativeTime(iso: string | null): string {
   if (!iso) return "never";
@@ -56,24 +56,6 @@ export function price(value: string): string {
     maximumFractionDigits: 2,
   });
 }
-
-export const severityStyles: Record<
-  Severity,
-  { border: string; text: string; label: string }
-> = {
-  critical: {
-    border: "border-l-sev-critical",
-    text: "text-sev-critical",
-    label: "Critical",
-  },
-  high: { border: "border-l-sev-high", text: "text-sev-high", label: "High" },
-  notable: {
-    border: "border-l-sev-notable",
-    text: "text-sev-notable",
-    label: "Notable",
-  },
-  quiet: { border: "border-l-sev-quiet", text: "text-sev-quiet", label: "Quiet" },
-};
 
 /**
  * Freshness copy. The headline label is decided by the data *source* first:
