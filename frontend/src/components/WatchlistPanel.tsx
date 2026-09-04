@@ -4,16 +4,16 @@ import { Button, Card, CardBody, SectionLabel } from "@/components/ui";
 import { companyName } from "@/universe";
 
 /**
- * Watchlist management and attention preferences, as a compact configuration
- * dashboard. Semantics and values are unchanged from before — only the layout.
+ * Watchlist symbols and attention preferences. Semantics and values are
+ * unchanged — the `view` prop just picks which half to show so the sidebar can
+ * route "Watchlist" (symbols) and "Manage" (sensitivities) separately.
  */
-const PRIORITY_LABEL: Record<number, string> = { 1: "High", 2: "Normal", 3: "Low" };
-
 const selectCls =
   "rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-sm text-ink-700 " +
   "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25";
 
 export function WatchlistPanel({
+  view,
   watchlist,
   preferences,
   onAdd,
@@ -23,6 +23,7 @@ export function WatchlistPanel({
   onUpdatePreferences,
   busy,
 }: {
+  view: "watchlist" | "manage";
   watchlist: Watchlist;
   preferences: Preferences | null;
   onAdd: (symbol: string, priority: number) => Promise<void>;
@@ -55,6 +56,19 @@ export function WatchlistPanel({
 
   return (
     <div className="space-y-6">
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+          {view === "watchlist" ? "Watchlist" : "Manage what surfaces"}
+        </h1>
+        <p className="mt-1 text-sm text-ink-500">
+          {view === "watchlist"
+            ? "The symbols you monitor. Reorder, set priority, add or remove."
+            : "Tune the thresholds that decide what your brief raises."}
+        </p>
+      </header>
+
+      {view === "watchlist" && (
+        <>
       {/* ── Add stock ─────────────────────────────────────── */}
       <Card>
         <CardBody className="py-4">
@@ -103,13 +117,13 @@ export function WatchlistPanel({
           ) : (
             <ul className="mt-3 divide-y divide-line">
               {items.map((item, index) => (
-                <li key={item.id} className="flex items-center gap-3 py-2.5">
-                  <div className="flex flex-col text-ink-400">
+                <li key={item.id} className="flex items-center gap-3 py-2">
+                  <div className="flex w-4 shrink-0 flex-col text-[10px] leading-none text-ink-400">
                     <button
                       onClick={() => move(index, -1)}
                       disabled={index === 0 || busy}
                       aria-label={`Move ${item.symbol} up`}
-                      className="leading-none transition-colors hover:text-ink-700 disabled:opacity-30"
+                      className="transition-colors hover:text-ink-700 disabled:opacity-25"
                     >
                       ▲
                     </button>
@@ -117,25 +131,38 @@ export function WatchlistPanel({
                       onClick={() => move(index, 1)}
                       disabled={index === items.length - 1 || busy}
                       aria-label={`Move ${item.symbol} down`}
-                      className="leading-none transition-colors hover:text-ink-700 disabled:opacity-30"
+                      className="transition-colors hover:text-ink-700 disabled:opacity-25"
                     >
                       ▼
                     </button>
                   </div>
 
-                  <div className="w-36 min-w-0">
-                    <div className="font-semibold text-ink-900">{item.symbol}</div>
-                    <div className="truncate text-[11px] text-ink-400">
-                      {companyName(item.symbol) ?? "—"}
-                    </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="font-semibold text-ink-900">
+                      {item.symbol}
+                    </span>
+                    <span className="ml-2 truncate text-[11px] text-ink-400">
+                      {companyName(item.symbol) ?? ""}
+                    </span>
                   </div>
+
+                  {(item.threshold_above || item.threshold_below) && (
+                    <span
+                      title={`Alerts: ${item.threshold_above ? `above ${item.threshold_above}` : ""}${item.threshold_above && item.threshold_below ? ", " : ""}${item.threshold_below ? `below ${item.threshold_below}` : ""}`}
+                      className="hidden shrink-0 rounded bg-sunk px-1.5 py-0.5 text-[10px] font-medium text-ink-500 sm:inline"
+                    >
+                      alerts
+                    </span>
+                  )}
 
                   <select
                     value={item.priority}
                     onChange={(e) =>
-                      void onUpdateItem(item.id, { priority: Number(e.target.value) })
+                      void onUpdateItem(item.id, {
+                        priority: Number(e.target.value),
+                      })
                     }
-                    className={selectCls + " py-1 text-xs"}
+                    className={selectCls + " shrink-0 py-1 text-xs"}
                     aria-label={`Priority for ${item.symbol}`}
                   >
                     <option value={1}>High</option>
@@ -143,27 +170,10 @@ export function WatchlistPanel({
                     <option value={3}>Low</option>
                   </select>
 
-                  <span className="flex-1 truncate text-[11px] text-ink-400">
-                    {item.threshold_above || item.threshold_below ? (
-                      <>
-                        Alerts:{" "}
-                        {item.threshold_above && `above ${item.threshold_above}`}
-                        {item.threshold_above && item.threshold_below && ", "}
-                        {item.threshold_below && `below ${item.threshold_below}`}
-                      </>
-                    ) : (
-                      "No price alerts"
-                    )}
-                  </span>
-
-                  <span className="hidden text-[11px] font-medium text-ink-400 sm:inline">
-                    {PRIORITY_LABEL[item.priority]}
-                  </span>
-
                   <button
                     onClick={() => void onRemove(item.id)}
                     disabled={busy}
-                    className="text-xs font-medium text-ink-400 transition-colors hover:text-down disabled:opacity-40"
+                    className="shrink-0 text-xs font-medium text-ink-400 transition-colors hover:text-down disabled:opacity-40"
                   >
                     Remove
                   </button>
@@ -173,9 +183,11 @@ export function WatchlistPanel({
           )}
         </CardBody>
       </Card>
+        </>
+      )}
 
       {/* ── Sensitivity controls ──────────────────────────── */}
-      {preferences && (
+      {view === "manage" && preferences && (
         <section>
           <div className="mb-3">
             <SectionLabel>What you want surfaced</SectionLabel>

@@ -8,23 +8,17 @@ import type {
   TimelineEntry,
   Watchlist,
 } from "./types";
-import { sourceCopy } from "./format";
-import { cn } from "@/lib/utils";
 import { Button, Skeleton } from "@/components/ui";
 import { MarketBrief } from "./components/MarketBrief";
 import { WatchlistPanel } from "./components/WatchlistPanel";
 import { SignIn } from "./components/SignIn";
 import { Timeline } from "./components/Timeline";
 import { SymbolPath } from "./components/SymbolPath";
+import { MobileTopBar, Sidebar, type NavId } from "./components/Sidebar";
 
 const REFRESH_MS = 20_000;
 
-type Tab = "brief" | "history" | "manage";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "brief", label: "Brief" },
-  { id: "history", label: "History" },
-  { id: "manage", label: "Manage" },
-];
+type Tab = NavId;
 
 export default function App() {
   const [authed, setAuthed] = useState(() => getToken() !== null);
@@ -32,6 +26,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
 
   const [tab, setTab] = useState<Tab>("brief");
+  const [navOpen, setNavOpen] = useState(false);
   const [pathSymbol, setPathSymbol] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<Watchlist | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
@@ -203,23 +198,31 @@ export default function App() {
     return <SignIn onSubmit={handleAuth} error={authError} busy={authBusy} />;
   }
 
+  function navigate(t: Tab) {
+    setTab(t);
+    setPathSymbol(null);
+    setJustReviewedAt(null);
+    setNavOpen(false);
+  }
+
   return (
-    <div className="min-h-screen">
-      <Header
-        tab={tab}
-        onTab={(t) => {
-          setTab(t);
-          setPathSymbol(null);
-          setJustReviewedAt(null);
-        }}
+    <div className="min-h-screen lg:flex">
+      <Sidebar
+        active={tab}
+        onNav={navigate}
         source={source}
         onDemo={runDemo}
         demoBusy={demoBusy}
         onSignOut={signOut}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
       />
 
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        {error && (
+      <div className="min-w-0 flex-1">
+        <MobileTopBar onOpen={() => setNavOpen(true)} />
+
+        <main className="max-w-6xl px-4 py-8 lg:px-10">
+          {error && (
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-sev-bg-critical bg-sev-bg-critical px-4 py-3 text-sm text-sev-critical">
             <span className="flex-1">{error}</span>
             <Button size="sm" onClick={() => void load(true)}>
@@ -262,6 +265,7 @@ export default function App() {
           />
         ) : (
           <WatchlistPanel
+            view={tab === "manage" ? "manage" : "watchlist"}
             watchlist={watchlist}
             preferences={preferences}
             busy={busy}
@@ -282,104 +286,9 @@ export default function App() {
             }
           />
         )}
-      </main>
-    </div>
-  );
-}
-
-function Header({
-  tab,
-  onTab,
-  source,
-  onDemo,
-  demoBusy,
-  onSignOut,
-}: {
-  tab: Tab;
-  onTab: (t: Tab) => void;
-  source: MarketSource | null;
-  onDemo: () => void;
-  demoBusy: boolean;
-  onSignOut: () => void;
-}) {
-  const chip = source ? sourceCopy(source) : null;
-  return (
-    <header className="sticky top-0 z-10 border-b border-line bg-surface/85 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-3 sm:gap-4 sm:px-4">
-        <span className="flex shrink-0 items-center gap-2 text-sm font-semibold tracking-tight text-ink-900">
-          <span className="grid h-6 w-6 place-items-center rounded-md bg-ink-900 text-white">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M2 11.5 6 6l3 3 5-7"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span className="hidden md:inline">Watchlist</span>
-        </span>
-
-        <nav className="flex gap-0.5 sm:gap-1">
-          {TABS.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => onTab(id)}
-              className={cn(
-                "rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3",
-                tab === id
-                  ? "bg-sunk text-ink-900"
-                  : "text-ink-500 hover:text-ink-700",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-2.5">
-          {chip && (
-            <span
-              title={chip.help}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11px] font-medium sm:px-2",
-                chip.tone === "live" && "border-up/30 bg-up/10 text-up",
-                chip.tone === "sim" && "border-line bg-surface text-ink-500",
-                chip.tone === "degraded" &&
-                  "border-sev-high/30 bg-sev-bg-high text-sev-high",
-              )}
-            >
-              <span
-                className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  chip.tone === "live" && "bg-up",
-                  chip.tone === "sim" && "bg-ink-400",
-                  chip.tone === "degraded" && "bg-sev-high",
-                )}
-              />
-              <span className="hidden sm:inline">{chip.label}</span>
-            </span>
-          )}
-          {source?.demo_mode && (
-            <Button
-              size="sm"
-              onClick={onDemo}
-              disabled={demoBusy}
-              className="whitespace-nowrap"
-            >
-              {demoBusy ? "Seeding…" : "Demo"}
-            </Button>
-          )}
-          <button
-            onClick={onSignOut}
-            className="whitespace-nowrap text-xs font-medium text-ink-400 transition-colors hover:text-ink-700"
-          >
-            Sign out
-          </button>
-        </div>
+        </main>
       </div>
-    </header>
+    </div>
   );
 }
 

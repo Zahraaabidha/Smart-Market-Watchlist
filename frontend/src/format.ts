@@ -57,6 +57,32 @@ export function price(value: string): string {
   });
 }
 
+/** A 2–4 word label for a reason code, for dense rows and card subtitles. */
+const REASON_SHORT: Record<string, string> = {
+  move_vs_threshold: "threshold crossed",
+  unusual_vs_baseline: "unusual for this stock",
+  volume_anomaly: "volume spike",
+  threshold_above: "price alert hit",
+  threshold_below: "price alert hit",
+  intrawindow_swing: "swing then reversal",
+  priority: "priority weighting",
+  freshness_penalty: "reduced confidence",
+};
+
+export function shortReason(code: string): string {
+  return REASON_SHORT[code] ?? code.replace(/_/g, " ");
+}
+
+/** The single most important reason on a change (highest contribution). */
+export function leadReason(
+  reasons: { code: string; contribution: number }[],
+): string | null {
+  const top = [...reasons]
+    .filter((r) => r.contribution > 0)
+    .sort((a, b) => b.contribution - a.contribution)[0];
+  return top ? shortReason(top.code) : null;
+}
+
 /**
  * Freshness copy. The headline label is decided by the data *source* first:
  * replay data is never called "Live" no matter how recent, because it is not a

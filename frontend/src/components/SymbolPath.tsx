@@ -10,7 +10,14 @@ import {
   relativeTime,
   signedPct,
 } from "@/format";
-import { Card, CardBody, SectionLabel, SeverityBadge, Skeleton } from "@/components/ui";
+import {
+  Card,
+  CardBody,
+  SectionLabel,
+  SeverityBadge,
+  Skeleton,
+} from "@/components/ui";
+import { sourceCopy } from "@/format";
 import { companyName } from "@/universe";
 import { BklitPathChart } from "./BklitPathChart";
 
@@ -95,17 +102,17 @@ export function SymbolPath({
 
       {detail && (
         <>
-          {/* headline numbers */}
+          {/* headline numbers — checkpoint → movement → extreme → now */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Metric label="Checkpoint" value={price(detail.checkpoint_price)} />
+            <Metric label="You left at" value={price(detail.checkpoint_price)} />
             <Metric
-              label="Peak move"
+              label="Peak while away"
               value={peakMove != null ? signedPct(peakMove) : "—"}
               tone={peakMove != null && peakMove >= 0 ? "up" : "down"}
             />
-            <Metric label="Current" value={price(detail.current_value)} />
+            <Metric label="Now" value={price(detail.current_value)} />
             <Metric
-              label="Settled at"
+              label="Change since review"
               value={endMove != null ? signedPct(endMove) : "—"}
               tone={endMove != null && endMove >= 0 ? "up" : "down"}
             />
@@ -161,19 +168,46 @@ export function SymbolPath({
           <section className="space-y-2">
             <SectionLabel>Can I trust this data?</SectionLabel>
             <Card>
+              <div className="border-b border-line px-4 py-3">
+                {(() => {
+                  const s = sourceCopy({
+                    provider: detail.source,
+                    mode: "replay",
+                    degraded: false,
+                  });
+                  return (
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        className={
+                          "h-2 w-2 rounded-full " +
+                          (s.tone === "live"
+                            ? "bg-up"
+                            : s.tone === "degraded"
+                              ? "bg-sev-high"
+                              : "bg-ink-400")
+                        }
+                      />
+                      <span className="text-sm font-semibold text-ink-900">
+                        {s.label}
+                      </span>
+                      <span className="text-xs text-ink-400">{s.help}</span>
+                    </span>
+                  );
+                })()}
+              </div>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-4">
                 <Trust label="Source" value={detail.source} />
                 <Trust
-                  label="Source time"
+                  label="Source timestamp"
                   value={`${clockTime(detail.source_timestamp)} · ${relativeTime(
                     detail.source_timestamp,
                   )}`}
                 />
                 <Trust
-                  label="Received"
+                  label="Received timestamp"
                   value={
                     detail.received_at
-                      ? relativeTime(detail.received_at)
+                      ? `${clockTime(detail.received_at)} · ${relativeTime(detail.received_at)}`
                       : "—"
                   }
                 />
@@ -187,7 +221,7 @@ export function SymbolPath({
             <p className="text-xs text-ink-400">
               Absence window:{" "}
               {durationBetween(detail.last_checked_at, detail.window_end)} · last
-              checked {relativeTime(detail.last_checked_at)}
+              reviewed {relativeTime(detail.last_checked_at)}
             </p>
           </section>
         </>

@@ -1,5 +1,5 @@
 import type { TimelineEntry } from "@/types";
-import { clockTime, price, signedPct } from "@/format";
+import { clockTime, leadReason, price, signedPct } from "@/format";
 import { Card, CardBody, SeverityBadge, Skeleton } from "@/components/ui";
 import { companyName } from "@/universe";
 
@@ -108,21 +108,24 @@ export function Timeline({
                       <span className="hidden shrink-0 sm:block">
                         <SeverityBadge severity={entry.severity} />
                       </span>
+                      <span
+                        className={`w-16 shrink-0 text-right font-semibold tabular-nums ${
+                          up ? "text-up" : "text-down"
+                        }`}
+                      >
+                        {signedPct(entry.change_pct)}
+                      </span>
                       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-500">
-                        {entry.reasons[0]?.text}
+                        since last review
+                        {leadReason(entry.reasons) && (
+                          <> · {leadReason(entry.reasons)}</>
+                        )}
                         {entry.reasons.length > 1 && (
                           <span className="text-ink-400">
                             {" "}
                             +{entry.reasons.length - 1}
                           </span>
                         )}
-                      </span>
-                      <span
-                        className={`shrink-0 text-right font-semibold tabular-nums ${
-                          up ? "text-up" : "text-down"
-                        }`}
-                      >
-                        {signedPct(entry.change_pct)}
                       </span>
                       <span className="hidden w-28 shrink-0 text-right text-[11px] tabular-nums text-ink-400 lg:block">
                         {price(entry.previous_value)} → {price(entry.current_value)}

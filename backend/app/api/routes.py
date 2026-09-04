@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,7 @@ from app.core.errors import AppError
 from app.core.security import create_access_token, hash_password, verify_password
 from app.integrations.replay import FailingProvider, ReplayProvider
 from app.persistence.db import get_session
-from app.persistence.models import User, UserCheckpoint
+from app.persistence.models import MarketSnapshot, User, UserCheckpoint
 from app.services import brief as brief_service
 from app.services import history as history_service
 from app.services import watchlists as wl
@@ -483,11 +483,8 @@ demo_router = APIRouter(prefix="/demo", tags=["demo"])
 _DEMO_AWAY_CANDIDATES = (
     timedelta(hours=3),
     timedelta(hours=4),
-    timedelta(hours=2),
-    timedelta(hours=5),
-    timedelta(hours=6),
 )
-_DEMO_BACKFILL = timedelta(hours=12)
+_DEMO_BACKFILL = timedelta(hours=7)
 
 
 @demo_router.post("/replay", status_code=200)
@@ -516,8 +513,27 @@ def demo_replay(
 
     provider = ReplayProvider()
     symbols = [item.symbol for item in watchlist.items]
-    backfill(session, provider, symbols, now, window=_DEMO_BACKFILL)
-    session.flush()
+    # Backfill any symbol whose coverage of the demo window is thin. `backfill`
+    # goes through the normal ingest path (ON CONFLICT DO NOTHING), so symbols
+    # the shared ingestion loop already filled cost only a fast no-op scan and a
+    # freshly added symbol gets a gap-free series.
+    window_start = now - _DEMO_AWAY_CANDIDATES[-1]
+    covered = dict(
+        session.execute(
+            select(MarketSnapshot.symbol, func.count())
+            .where(
+                MarketSnapshot.symbol.in_(symbols),
+                MarketSnapshot.source_timestamp >= window_start,
+                MarketSnapshot.source_timestamp <= now,
+                MarketSnapshot.out_of_order.is_(False),
+            )
+            .group_by(MarketSnapshot.symbol)
+        ).all()
+    )
+    thin = [s for s in symbols if covered.get(s, 0) < 200]
+    if thin:
+        backfill(session, provider, thin, now, window=_DEMO_BACKFILL)
+        session.flush()
 
     def _reset_checkpoints() -> None:
         # A demo *reset*: drop this watchlist's checkpoints so the window is
