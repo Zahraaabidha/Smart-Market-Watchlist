@@ -15,6 +15,32 @@ const dot: Record<TimelineEntry["severity"], string> = {
   quiet: "bg-sev-quiet",
 };
 
+/**
+ * Two rows are the *same event*, not just the same symbol recurring, only
+ * when every fact about them matches: symbol, detection time, the move
+ * itself, and the price range it moved across. A symbol legitimately shows
+ * up many times with different timestamps/movements/price ranges (different
+ * review windows) — that is not a duplicate and must never be collapsed.
+ * This only ever removes a row that is a byte-for-byte repeat of another.
+ */
+function dedupeIdenticalEvents(entries: TimelineEntry[]): TimelineEntry[] {
+  const seen = new Set<string>();
+  const out: TimelineEntry[] = [];
+  for (const entry of entries) {
+    const key = [
+      entry.symbol,
+      entry.detected_at,
+      entry.change_pct,
+      entry.previous_value,
+      entry.current_value,
+    ].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
 export function Timeline({
   entries,
   loading,
@@ -51,7 +77,7 @@ export function Timeline({
   }
 
   const groups = new Map<string, TimelineEntry[]>();
-  for (const entry of entries) {
+  for (const entry of dedupeIdenticalEvents(entries)) {
     const day = new Date(entry.detected_at).toLocaleDateString(undefined, {
       weekday: "long",
       month: "short",
@@ -101,11 +127,24 @@ export function Timeline({
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot[entry.severity]}`}
                       />
-                      <span
-                        className="w-20 shrink-0 truncate font-semibold text-ink-900 sm:w-28"
-                        title={entry.symbol}
-                      >
-                        {entry.symbol}
+                      {/* symbol + company — one fixed-width column, same
+                          shape on every row and at every viewport width, so
+                          the identity block never overlaps the columns after
+                          it. Symbol on top (bold/prominent), company name
+                          underneath (smaller, muted) whenever the universe
+                          has one for this symbol — including when it's the
+                          same word as the symbol (ZOMATO/Zomato, ITC/ITC):
+                          consistency across rows matters more than avoiding
+                          that visual repeat. */}
+                      <span className="w-[6.5rem] shrink-0 sm:w-32" title={entry.symbol}>
+                        <span className="block truncate font-semibold text-ink-900">
+                          {entry.symbol}
+                        </span>
+                        {company && (
+                          <span className="block truncate text-[11px] font-normal text-ink-400">
+                            {company}
+                          </span>
+                        )}
                       </span>
                       <span className="hidden w-20 shrink-0 sm:block">
                         <SeverityBadge severity={entry.severity} />
@@ -118,11 +157,6 @@ export function Timeline({
                         {signedPct(entry.change_pct)}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-500">
-                        {company && (
-                          <span className="hidden text-ink-400 md:inline">
-                            {company} ·{" "}
-                          </span>
-                        )}
                         since last review
                         {reason && <> · {reason}</>}
                         {entry.reasons.length > 1 && (

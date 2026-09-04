@@ -18,10 +18,12 @@ import { clockTime, price, signedPct } from "@/format";
  * The absence-window story, drawn with the Bklit line chart.
  *
  * The price line is the visual hero. The grid is a pale hairline, the "while
- * you were away" band is a barely-there wash, and the markers are small dots
- * with no permanent text on the plot — checkpoint, intra-window high, intra-
- * window low and current. Everything (value, time, which marker) shows in a
- * light tooltip on hover. Real backend points, real high/low, tight y-domain.
+ * you were away" band is a barely-there wash. Four markers, each a distinct
+ * style so none reads as another: the checkpoint ("you left") is small and
+ * hollow; intra-window high/low and the current point are filled with a
+ * restrained white outline. No permanent text sits on the plot — which
+ * marker is which, and its exact value/time, shows entirely in a light
+ * tooltip on hover. Real backend points, real high/low, tight y-domain.
  *
  * Points the backend flags `gap_before` (a genuine break in data collection —
  * see `app/services/brief.py::_gap_threshold`) are never bridged with a solid
@@ -32,6 +34,11 @@ import { clockTime, price, signedPct } from "@/format";
 const UP = "#0f8a52";
 const DOWN = "#c8354a";
 const GAP_STROKE = "#b7bcc6";
+// NOW is deliberately neutral, not tied to the trend color: HIGH is always
+// green and LOW is always red regardless of which one NOW happens to sit
+// near, so a fixed dark neutral is the only fill that can never coincide
+// with either of them.
+const NOW_COLOR = "#0f1729";
 
 type Row = { date: Date; price: number; gapBefore: boolean };
 
@@ -51,9 +58,30 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
     const hi = Number(detail.window_high);
     const lo = Number(detail.window_low);
 
+    // `checkpointDate` (used for the shaded "while you were away" band) is
+    // the real moment the user reviewed — a fact about *when they left*.
+    // `checkpoint_price` is the last price actually known at/before that
+    // moment, which the backend anchors to whichever snapshot's timestamp is
+    // closest-but-not-after it. Those two are usually the same instant, but
+    // when the review moment falls inside a genuine collection gap they can
+    // be tens of minutes apart — and pairing the *review* timestamp with a
+    // price observed much earlier put the "you left" marker at an (x, y)
+    // that the rendered stroke never actually passes through, since the
+    // stroke between two real points is a straight interpolation between
+    // *their* prices, not a flat line at the earlier one.
+    //
+    // `checkpointMarkerDate` is the fix: the real observation timestamp that
+    // `checkpoint_price` itself was measured at — i.e. `rows[0]`, the first
+    // plotted point. Pairing the price with *its own* timestamp (rather than
+    // the separate review-click timestamp) guarantees the marker sits at an
+    // (x, y) that is a real, single, internally-consistent data point — the
+    // literal start of the line — using nothing but xScale/yScale. Nothing
+    // about the checkpoint price or the review timestamp itself changes;
+    // only which of the two already-real timestamps the *dot* is drawn at.
     const checkpointDate = detail.checkpoint_at
       ? new Date(detail.checkpoint_at)
       : rows[0]?.date;
+    const checkpointMarkerDate = rows[0].date;
 
     const nearest = (target: number) =>
       rows.reduce(
@@ -79,6 +107,19 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
       }
     }
 
+    // A little horizontal breathing room so the first/last markers (and the
+    // line's own endpoints) don't sit flush against the plot edges. This
+    // only widens the *axis*'s rendered range — the underlying points and
+    // their timestamps are untouched; nothing is added, moved, or inferred.
+    const firstDate = rows[0].date;
+    const lastDate = rows[rows.length - 1].date;
+    const span = +lastDate - +firstDate;
+    const edgePad = Math.max(span * 0.04, 2 * 60_000);
+    const xDomain: [Date, Date] = [
+      new Date(+firstDate - edgePad),
+      new Date(+lastDate + edgePad),
+    ];
+
     return {
       rows,
       segments,
@@ -89,6 +130,8 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
       hi,
       lo,
       checkpointDate,
+      checkpointMarkerDate,
+      xDomain,
       hiPoint: nearest(hi),
       loPoint: nearest(lo),
       lastPoint: rows[rows.length - 1],
@@ -112,6 +155,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
         <LineChart
           data={model.rows}
           xDataKey="date"
+          xDomain={model.xDomain}
           animationDuration={420}
           yDomainTween={false}
           aspectRatio="16 / 6"
@@ -163,11 +207,10 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
           <TimeAxis />
 
           <PathMarkers
-            checkpoint={{ date: model.checkpointDate, value: model.checkpoint }}
+            checkpoint={{ date: model.checkpointMarkerDate, value: model.checkpoint }}
             high={{ date: model.hiPoint.date, value: model.hi }}
             low={{ date: model.loPoint.date, value: model.lo }}
             now={{ date: model.lastPoint.date, value: model.current }}
-            color={stroke}
           />
 
           <ChartTooltip
@@ -194,8 +237,9 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
                   : ts === +model.loPoint.date
                     ? { text: "Intra-window low", color: DOWN }
                     : ts === +model.lastPoint.date
-                      ? { text: "Now", color: stroke }
-                      : model.checkpointDate && ts === +model.checkpointDate
+                      ? { text: "Now", color: NOW_COLOR }
+                      : model.checkpointMarkerDate &&
+                          ts === +model.checkpointMarkerDate
                         ? { text: "You left", color: "#697086" }
                         : null;
               return (
@@ -240,7 +284,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
         <LegendDot label="You left" ring="#8b91a3" />
         <LegendDot label="High" fill={UP} />
         <LegendDot label="Low" fill={DOWN} />
-        <LegendDot label="Now" fill={stroke} />
+        <LegendDot label="Now" fill={NOW_COLOR} />
         {model.hasGap && <LegendDot label="Gap" dashed />}
         <span className="ml-auto normal-case tracking-normal">
           {model.hasGap
@@ -384,49 +428,52 @@ function PathMarkers({
   high,
   low,
   now,
-  color,
 }: {
   checkpoint: Pt;
   high: Pt;
   low: Pt;
   now: Pt;
-  color: string;
 }) {
+  // Every marker's position comes straight out of the same xScale/yScale the
+  // line itself is drawn with — no hard-coded pixel nudging, no separate
+  // pixel-space math. `checkpoint` is `{ checkpointMarkerDate, checkpoint }`
+  // from the model above: the real timestamp the checkpoint price was itself
+  // observed at, so this always resolves to a genuine point on the line
+  // rather than an (x, y) pair assembled from two different moments.
   const { xScale, yScale } = useChartStable();
   const at = (p: Pt) => ({ x: xScale(p.date), y: yScale(p.value) });
-  const c = at(checkpoint);
-  const h = at(high);
-  const l = at(low);
+  const cN = at(checkpoint);
+  const hN = at(high);
+  const lN = at(low);
   const nw = at(now);
-
-  // Nudge a marker a hair off any other it would sit directly on top of.
-  // Thresholds/step scaled up slightly alongside the larger marker radii below.
-  const dodge = (
-    a: { x: number; y: number },
-    others: { x: number; y: number }[],
-  ) => {
-    let dx = 0;
-    for (const o of others) {
-      if (Math.abs(a.x - o.x) < 8 && Math.abs(a.y - o.y) < 8) dx += 7;
-    }
-    return { x: a.x + dx, y: a.y };
-  };
-  const cN = dodge(c, [h, l, nw]);
-  const hN = dodge(h, [l, nw]);
-  const lN = dodge(l, [nw]);
 
   const ok = (pt: { x: number; y: number }) =>
     Number.isFinite(pt.x) && Number.isFinite(pt.y);
 
-  // Three deliberately distinct marker styles, in increasing weight:
-  //   - checkpoint ("you left"): small and hollow — a reference point, not
-  //     an event.
-  //   - high/low: medium, filled with the up/down color, ringed in white so
-  //     it stays legible wherever the line or grid falls behind it.
-  //   - now: the same white-outline treatment, just slightly larger — it's
-  //     the endpoint the whole chart is building up to.
+  // Four deliberately distinct marker styles, so none can ever be mistaken
+  // for another at a glance:
+  //   - checkpoint ("you left"): small and *truly* hollow (fill: none, thin
+  //     gray ring) — a reference point, not an event.
+  //   - high: filled green, ringed in a restrained white outline.
+  //   - low: filled red, ringed the same way.
+  //   - now: filled with a fixed dark neutral (never green/red, so it can
+  //     never read as "another high" or "another low" even when the trend
+  //     since checkpoint happens to be up or down), white outline, slightly
+  //     larger — it's the endpoint the whole chart is building up to.
   // No text is drawn here; which marker is which, and its exact value/time,
   // lives entirely in the tooltip on hover.
+  //
+  // Overlap: the checkpoint price is sometimes *also* the window's high or
+  // low (e.g. the price only ever fell after you left) or coincides with
+  // `now`. None of the four markers is ever moved off its real (x, y) to
+  // dodge another — that would break "exactly at the checkpoint
+  // timestamp/price" for checkpoint and "do not move high/low/now" for the
+  // rest. Instead, checkpoint alone is rendered with no fill and a
+  // slightly larger radius than the filled markers, and painted last (on
+  // top). A ring with nothing in its interior never hides whatever else is
+  // drawn under it, so a filled high/low/now dot sitting at the exact same
+  // point still shows through the middle of the checkpoint ring — both
+  // remain visible, coordinates untouched.
   const marker = (
     pt: { x: number; y: number },
     { r, fill, stroke, strokeWidth }: {
@@ -449,14 +496,19 @@ function PathMarkers({
 
   return (
     <g className="chart-path-markers" pointerEvents="none">
-      {/* you left — small hollow dot */}
-      {marker(cN, { r: 3, fill: "#fff", stroke: "#8b91a3", strokeWidth: 1.5 })}
-      {/* intra-window high — medium, filled, white outline */}
-      {marker(hN, { r: 5, fill: UP, stroke: "#fff", strokeWidth: 2 })}
-      {/* intra-window low — medium, filled, white outline */}
-      {marker(lN, { r: 5, fill: DOWN, stroke: "#fff", strokeWidth: 2 })}
-      {/* now — slightly larger than high/low, filled, white outline */}
-      {marker(nw, { r: 6, fill: color, stroke: "#fff", strokeWidth: 2.25 })}
+      {/* intra-window high — ~6px, filled, restrained white outline */}
+      {marker(hN, { r: 3, fill: UP, stroke: "#fff", strokeWidth: 1.5 })}
+      {/* intra-window low — ~6px, filled, restrained white outline */}
+      {marker(lN, { r: 3, fill: DOWN, stroke: "#fff", strokeWidth: 1.5 })}
+      {/* now — ~7px, slightly larger than high/low, neutral fill (never
+          green/red), white outline */}
+      {marker(nw, { r: 3.5, fill: NOW_COLOR, stroke: "#fff", strokeWidth: 1.75 })}
+      {/* you left — small hollow ring, painted last (on top) and with no
+          fill so it never obscures — and is never obscured by — a filled
+          marker that happens to sit at the exact same point (see comment
+          above); slightly larger radius than the filled markers so that
+          ring reads clearly even when one of them is dead-center inside it */}
+      {marker(cN, { r: 4.5, fill: "none", stroke: "#8b91a3", strokeWidth: 1.5 })}
     </g>
   );
 }
