@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, getToken, setToken } from "./api";
-import type { Brief, Item, Preferences, TimelineEntry, Watchlist } from "./types";
+import type {
+  Brief,
+  Item,
+  MarketSource,
+  Preferences,
+  TimelineEntry,
+  Watchlist,
+} from "./types";
+import { sourceCopy } from "./format";
+import { cn } from "@/lib/utils";
+import { Button, Skeleton } from "@/components/ui";
 import { MarketBrief } from "./components/MarketBrief";
 import { WatchlistPanel } from "./components/WatchlistPanel";
 import { SignIn } from "./components/SignIn";
 import { Timeline } from "./components/Timeline";
+import { SymbolPath } from "./components/SymbolPath";
 
 const REFRESH_MS = 20_000;
 
-type Tab = "brief" | "history" | "watchlist";
+type Tab = "brief" | "history" | "manage";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "brief", label: "Brief" },
+  { id: "history", label: "History" },
+  { id: "manage", label: "Manage" },
+];
 
 export default function App() {
   const [authed, setAuthed] = useState(() => getToken() !== null);
@@ -16,9 +32,11 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
 
   const [tab, setTab] = useState<Tab>("brief");
+  const [pathSymbol, setPathSymbol] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<Watchlist | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [source, setSource] = useState<MarketSource | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
 
@@ -26,6 +44,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkpointing, setCheckpointing] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
 
   // Retains the last good brief across a failed refresh so a transient network
   // blip does not blank the screen the user is reading.
@@ -39,12 +58,14 @@ export default function App() {
       setWatchlist(first);
 
       if (first) {
-        const [nextBrief, prefs] = await Promise.all([
+        const [nextBrief, prefs, src] = await Promise.all([
           api.brief(first.id),
           api.preferences(),
+          api.marketSource().catch(() => null),
         ]);
         setBrief(nextBrief);
         setPreferences(prefs);
+        if (src) setSource(src);
       }
       setError(null);
       hasLoadedOnce.current = true;
@@ -111,9 +132,6 @@ export default function App() {
     }
   }
 
-  // Loaded only when the history tab is opened. It is not needed to answer
-  // "what should I look at now", so fetching it with every brief would be work
-  // most visits never use.
   useEffect(() => {
     if (!authed || tab !== "history" || !watchlist) return;
     let cancelled = false;
@@ -152,6 +170,21 @@ export default function App() {
     }
   }
 
+  async function runDemo() {
+    setDemoBusy(true);
+    setError(null);
+    try {
+      await api.demoReplay();
+      setTab("brief");
+      setPathSymbol(null);
+      await load(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start the demo.");
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
   function signOut() {
     setToken(null);
     setAuthed(false);
@@ -166,68 +199,59 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <nav className="border-b border-ink-800 sticky top-0 bg-ink-950/90 backdrop-blur z-10">
-        <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-6">
-          <span className="text-sm font-semibold text-slate-200 tracking-tight">
-            Watchlist
-          </span>
-          <div className="flex gap-1">
-            {(["brief", "history", "watchlist"] as const).map((name) => (
-              <button
-                key={name}
-                onClick={() => setTab(name)}
-                className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                  tab === name
-                    ? "bg-ink-800 text-slate-100"
-                    : "text-slate-500 hover:text-slate-300"
-                }`}
-              >
-                {name === "brief"
-                  ? "Brief"
-                  : name === "history"
-                    ? "History"
-                    : "Manage"}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={signOut}
-            className="ml-auto text-xs text-slate-500 hover:text-slate-300"
-          >
-            Sign out
-          </button>
-        </div>
-      </nav>
+      <Header
+        tab={tab}
+        onTab={(t) => {
+          setTab(t);
+          setPathSymbol(null);
+        }}
+        source={source}
+        onDemo={runDemo}
+        demoBusy={demoBusy}
+        onSignOut={signOut}
+      />
 
-      <main className="max-w-3xl mx-auto px-4 py-8">
+      <main className="mx-auto max-w-4xl px-4 py-8">
         {error && (
-          <div className="mb-6 rounded-md border border-rose-900/60 bg-rose-950/30 px-4 py-3 text-sm text-rose-200 flex items-center gap-3">
+          <div className="mb-6 flex items-center gap-3 rounded-lg border border-sev-bg-critical bg-sev-bg-critical px-4 py-3 text-sm text-sev-critical">
             <span className="flex-1">{error}</span>
-            <button
-              onClick={() => void load(true)}
-              className="text-xs px-2 py-1 rounded border border-rose-800 hover:bg-rose-900/40"
-            >
+            <Button size="sm" onClick={() => void load(true)}>
               Retry
-            </button>
+            </Button>
           </div>
         )}
 
         {loading && !hasLoadedOnce.current ? (
           <LoadingState />
         ) : !watchlist ? (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-ink-500">
             No watchlist found for this account.
           </p>
+        ) : pathSymbol && watchlist ? (
+          <SymbolPath
+            watchlistId={watchlist.id}
+            symbol={pathSymbol}
+            change={
+              brief?.attention.find((c) => c.symbol === pathSymbol) ?? null
+            }
+            onBack={() => setPathSymbol(null)}
+          />
         ) : tab === "brief" ? (
           brief && (
             <MarketBrief
               brief={brief}
               onCheckpoint={handleCheckpoint}
               checkpointing={checkpointing}
+              onOpenPath={(symbol) => setPathSymbol(symbol)}
             />
           )
         ) : tab === "history" ? (
-          <Timeline entries={timeline} loading={timelineLoading} />
+          <Timeline
+            entries={timeline}
+            loading={timelineLoading}
+            watchedSymbols={watchlist.items.map((i) => i.symbol)}
+            onOpenPath={(symbol) => setPathSymbol(symbol)}
+          />
         ) : (
           <WatchlistPanel
             watchlist={watchlist}
@@ -255,15 +279,115 @@ export default function App() {
   );
 }
 
+function Header({
+  tab,
+  onTab,
+  source,
+  onDemo,
+  demoBusy,
+  onSignOut,
+}: {
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  source: MarketSource | null;
+  onDemo: () => void;
+  demoBusy: boolean;
+  onSignOut: () => void;
+}) {
+  const chip = source ? sourceCopy(source) : null;
+  return (
+    <header className="sticky top-0 z-10 border-b border-line bg-surface/85 backdrop-blur">
+      <div className="mx-auto flex h-14 max-w-4xl items-center gap-2 px-3 sm:gap-4 sm:px-4">
+        <span className="flex shrink-0 items-center gap-2 text-sm font-semibold tracking-tight text-ink-900">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-ink-900 text-white">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M2 11.5 6 6l3 3 5-7"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className="hidden md:inline">Watchlist</span>
+        </span>
+
+        <nav className="flex gap-0.5 sm:gap-1">
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => onTab(id)}
+              className={cn(
+                "rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3",
+                tab === id
+                  ? "bg-sunk text-ink-900"
+                  : "text-ink-500 hover:text-ink-700",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-2.5">
+          {chip && (
+            <span
+              title={chip.help}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11px] font-medium sm:px-2",
+                chip.tone === "live" && "border-up/30 bg-up/10 text-up",
+                chip.tone === "sim" && "border-line bg-surface text-ink-500",
+                chip.tone === "degraded" &&
+                  "border-sev-high/30 bg-sev-bg-high text-sev-high",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  chip.tone === "live" && "bg-up",
+                  chip.tone === "sim" && "bg-ink-400",
+                  chip.tone === "degraded" && "bg-sev-high",
+                )}
+              />
+              <span className="hidden sm:inline">{chip.label}</span>
+            </span>
+          )}
+          {source?.demo_mode && (
+            <Button
+              size="sm"
+              onClick={onDemo}
+              disabled={demoBusy}
+              className="whitespace-nowrap"
+            >
+              {demoBusy ? "Seeding…" : "Demo"}
+            </Button>
+          )}
+          <button
+            onClick={onSignOut}
+            className="whitespace-nowrap text-xs font-medium text-ink-400 transition-colors hover:text-ink-700"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function LoadingState() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading your brief">
-      <div className="h-7 w-2/3 rounded bg-ink-900 animate-pulse" />
-      <div className="h-4 w-1/2 rounded bg-ink-900 animate-pulse" />
-      <div className="pt-4 space-y-3">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-28 rounded bg-ink-900 animate-pulse" />
-        ))}
+      <Skeleton className="h-8 w-2/3" />
+      <Skeleton className="h-4 w-1/2" />
+      <div className="grid grid-cols-3 gap-3 pt-2">
+        <Skeleton className="h-20" />
+        <Skeleton className="h-20" />
+        <Skeleton className="h-20" />
+      </div>
+      <div className="space-y-3 pt-2">
+        <Skeleton className="h-32" />
+        <Skeleton className="h-32" />
       </div>
     </div>
   );

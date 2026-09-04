@@ -8,22 +8,25 @@ without spinning up a request.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api import schemas
 from app.api.deps import current_user, utcnow
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import create_access_token, hash_password, verify_password
+from app.integrations.replay import FailingProvider, ReplayProvider
 from app.persistence.db import get_session
-from app.persistence.models import User
+from app.persistence.models import User, UserCheckpoint
 from app.services import brief as brief_service
 from app.services import history as history_service
 from app.services import watchlists as wl
+from app.services.backfill import backfill
 
 router = APIRouter()
 
@@ -235,6 +238,7 @@ brief_router = APIRouter(tags=["brief"])
 @brief_router.get("/watchlists/{watchlist_id}/brief", response_model=schemas.BriefResponse)
 def get_brief(
     watchlist_id: int,
+    request: Request,
     user: User = Depends(current_user),
     session: Session = Depends(get_session),
     now: datetime = Depends(utcnow),
@@ -252,6 +256,7 @@ def get_brief(
         raise _fail(exc) from exc
 
     result = brief_service.build_brief(session, user, watchlist, now)
+    status = getattr(request.app.state, "market_status", None)
 
     return schemas.BriefResponse(
         watchlist_id=result.watchlist_id,
@@ -260,11 +265,66 @@ def get_brief(
         generated_at=result.generated_at,
         monitored_count=result.monitored_count,
         meaningful_count=len(result.attention),
-        attention=[_change_to_schema(c) for c in result.attention],
-        quiet=[_change_to_schema(c) for c in result.quiet],
+        attention=[
+            _change_to_schema(c, result.paths, result.market_source)
+            for c in result.attention
+        ],
+        quiet=[_change_to_schema(c, {}, result.market_source) for c in result.quiet],
         unavailable_symbols=result.unavailable_symbols,
         overall_freshness=result.overall_freshness,
         window_truncated=result.window_truncated,
+        market_source=result.market_source,
+        degraded=bool(getattr(status, "degraded", False)),
+    )
+
+
+@brief_router.get(
+    "/watchlists/{watchlist_id}/path/{symbol}",
+    response_model=schemas.SymbolPathResponse,
+)
+def get_symbol_path(
+    watchlist_id: int,
+    symbol: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+    now: datetime = Depends(utcnow),
+):
+    """Full-resolution price path for one watched symbol, for the detail view.
+
+    The symbol must be on the watchlist -- an arbitrary symbol returns 404, the
+    same answer as a watchlist that is not the caller's, so ownership and
+    membership leak nothing by their error codes.
+    """
+    try:
+        watchlist = wl.get_owned_watchlist(session, user, watchlist_id)
+    except AppError as exc:
+        raise _fail(exc) from exc
+
+    wanted = symbol.upper()
+    if not any(item.symbol == wanted for item in watchlist.items):
+        raise HTTPException(status_code=404, detail="symbol not on this watchlist")
+
+    path = brief_service.build_symbol_path(session, watchlist, wanted, now)
+    if path is None:
+        raise HTTPException(
+            status_code=404, detail="no market data on record for this symbol"
+        )
+
+    return schemas.SymbolPathResponse(
+        symbol=path.symbol,
+        points=[schemas.PathPoint(t=t, price=p) for t, p in path.points],
+        checkpoint_at=path.checkpoint_at,
+        checkpoint_price=path.checkpoint_price,
+        window_high=path.window_high,
+        window_low=path.window_low,
+        window_start=path.window_start,
+        window_end=path.window_end,
+        current_value=path.current_value,
+        source=path.source,
+        source_timestamp=path.source_timestamp,
+        received_at=path.received_at,
+        freshness=path.freshness,
+        last_checked_at=path.last_checked_at,
     )
 
 
@@ -348,7 +408,20 @@ def get_timeline(
     ]
 
 
-def _change_to_schema(change) -> schemas.ChangeResponse:
+def _path_to_schema(path) -> schemas.PricePath:
+    return schemas.PricePath(
+        points=[schemas.PathPoint(t=t, price=p) for t, p in path.points],
+        checkpoint_at=path.checkpoint_at,
+        checkpoint_price=path.checkpoint_price,
+        window_high=path.window_high,
+        window_low=path.window_low,
+        window_start=path.window_start,
+        window_end=path.window_end,
+    )
+
+
+def _change_to_schema(change, paths, market_source) -> schemas.ChangeResponse:
+    path = paths.get(change.symbol)
     return schemas.ChangeResponse(
         symbol=change.symbol,
         change_type=change.change_type.value,
@@ -367,10 +440,139 @@ def _change_to_schema(change) -> schemas.ChangeResponse:
             )
             for r in change.reasons
         ],
+        source=market_source if market_source != "none" else None,
+        path=_path_to_schema(path) if path is not None else None,
     )
+
+
+# --- market source & demo controls ------------------------------------------
+
+ops_router = APIRouter(tags=["ops"])
+
+
+@ops_router.get("/market/source", response_model=schemas.MarketSourceResponse)
+def market_source(request: Request) -> schemas.MarketSourceResponse:
+    """What is actually feeding the product right now, and whether it degraded.
+
+    Reads process state written by the ingestion loop -- no database hit. The
+    UI uses this to label data honestly ("Replay data" vs "Live") and to show a
+    degraded badge instead of pretending a dead vendor is healthy.
+    """
+    settings = get_settings()
+    status = getattr(request.app.state, "market_status", None)
+    provider = getattr(request.app.state, "provider", None)
+    provider_name = getattr(provider, "name", "replay")
+
+    return schemas.MarketSourceResponse(
+        provider=provider_name,
+        mode="live" if settings.market_provider == "live" else "replay",
+        degraded=bool(getattr(status, "degraded", False)),
+        degraded_reason=getattr(status, "degraded_reason", None),
+        last_poll_at=getattr(status, "last_poll_at", None),
+        last_success_at=getattr(status, "last_success_at", None),
+        demo_mode=settings.demo_mode,
+    )
+
+
+demo_router = APIRouter(prefix="/demo", tags=["demo"])
+
+# The replay window seeded for the in-app demo: the user "checked" this long
+# before now, was away, and returns to a populated brief.
+_DEMO_AWAY = timedelta(hours=3)
+_DEMO_BACKFILL = timedelta(hours=12)
+
+
+@demo_router.post("/replay", status_code=200)
+def demo_replay(
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+    now: datetime = Depends(utcnow),
+) -> dict[str, str]:
+    """Reproduce the product's core scenario for the signed-in user.
+
+    check (now - 3h) -> market moves -> return (now) -> brief explains it.
+
+    Deterministic in substance: the replay series is a pure function of
+    timestamp, so the same wall-clock window always yields the same shape of
+    swings and quiet names. Only meaningful for demo_mode; the router is not
+    mounted otherwise.
+    """
+    watchlist = wl.list_watchlists(session, user)[0]
+
+    # Make sure the demo universe is present so there is something varied to
+    # rank. Adding is idempotent, so re-running is safe.
+    for symbol in wl.DEFAULT_SYMBOLS:
+        wl.add_item(session, user, watchlist.id, symbol)
+    session.flush()
+
+    # A demo *reset*: drop this watchlist's checkpoints so the scenario window
+    # is exactly "3h ago", not whatever the account last marked as read. This
+    # is the one place checkpoints are deleted, it is scoped to the caller's
+    # own watchlist, and the route only exists in demo mode.
+    session.query(UserCheckpoint).filter(
+        UserCheckpoint.watchlist_id == watchlist.id
+    ).delete(synchronize_session=False)
+    session.flush()
+
+    provider = ReplayProvider()
+    symbols = [item.symbol for item in watchlist.items]
+    backfill(session, provider, symbols, now, window=_DEMO_BACKFILL)
+
+    checked_at = now - _DEMO_AWAY
+    wl.record_checkpoint(
+        session, user, watchlist.id, checked_at, f"demo-{int(now.timestamp())}"
+    )
+    session.commit()
+
+    return {
+        "checked_at": checked_at.isoformat(),
+        "returned_at": now.isoformat(),
+        "away_for": str(_DEMO_AWAY),
+    }
+
+
+@demo_router.post("/provider", status_code=200)
+def demo_provider(
+    payload: schemas.DemoProviderRequest, request: Request
+) -> schemas.MarketSourceResponse:
+    """Swap the running provider to demonstrate degradation and failover.
+
+    `failing` proves the product keeps serving last-known-good data with an
+    explicit degraded badge instead of erroring. `replay` restores the default.
+    """
+    settings = get_settings()
+    if payload.mode == "failing":
+        request.app.state.provider = FailingProvider()
+    elif payload.mode == "live" and settings.twelve_data_api_key:
+        from app.integrations.fallback import FallbackProvider
+        from app.integrations.twelve_data import TwelveDataProvider
+
+        request.app.state.provider = FallbackProvider(
+            TwelveDataProvider(
+                api_key=settings.twelve_data_api_key,
+                exchange=settings.twelve_data_exchange,
+            ),
+            ReplayProvider(),
+        )
+    else:
+        request.app.state.provider = ReplayProvider()
+
+    status = request.app.state.market_status
+    status.mode = request.app.state.provider.name
+    status.degraded = payload.mode == "failing"
+    status.degraded_reason = (
+        "demo: provider forced into a failing state"
+        if payload.mode == "failing"
+        else None
+    )
+    return market_source(request)
 
 
 router.include_router(auth_router)
 router.include_router(prefs_router)
 router.include_router(watchlist_router)
 router.include_router(brief_router)
+router.include_router(ops_router)
+
+if get_settings().demo_mode:
+    router.include_router(demo_router)

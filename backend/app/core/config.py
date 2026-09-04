@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # How much per-symbol history the engine keeps for baseline computation.
     baseline_window_size: int = 40
 
+    # Market data source. "replay" is the deterministic simulator and the
+    # default; it needs no credentials and is always the fallback. "live" wraps
+    # a real vendor (Twelve Data) and degrades to replay on any failure, so the
+    # product never goes dark because a vendor did.
+    market_provider: str = "replay"
+    twelve_data_api_key: str | None = None
+    # Twelve Data qualifies Indian tickers by exchange (NSE / BSE).
+    twelve_data_exchange: str = "NSE"
+
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     @field_validator("secret_key")

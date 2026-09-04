@@ -7,6 +7,22 @@ export interface Reason {
   contribution: number;
 }
 
+export interface PathPoint {
+  t: string;
+  price: string;
+}
+
+/** The route a price took across the user's absence window. */
+export interface PricePath {
+  points: PathPoint[];
+  checkpoint_at: string | null;
+  checkpoint_price: string;
+  window_high: string;
+  window_low: string;
+  window_start: string;
+  window_end: string;
+}
+
 export interface Change {
   symbol: string;
   change_type: string;
@@ -20,6 +36,8 @@ export interface Change {
   freshness: Freshness;
   priority: number;
   reasons: Reason[];
+  source: string | null;
+  path: PricePath | null;
 }
 
 export interface Brief {
@@ -34,6 +52,29 @@ export interface Brief {
   unavailable_symbols: string[];
   overall_freshness: Freshness;
   window_truncated: boolean;
+  market_source: string;
+  degraded: boolean;
+}
+
+/** Full-resolution path plus data-trust fields, for the detail view. */
+export interface SymbolPathDetail extends PricePath {
+  symbol: string;
+  current_value: string;
+  source: string;
+  source_timestamp: string;
+  received_at: string | null;
+  freshness: Freshness;
+  last_checked_at: string | null;
+}
+
+export interface MarketSource {
+  provider: string;
+  mode: "live" | "replay";
+  degraded: boolean;
+  degraded_reason: string | null;
+  last_poll_at: string | null;
+  last_success_at: string | null;
+  demo_mode: boolean;
 }
 
 export interface Item {

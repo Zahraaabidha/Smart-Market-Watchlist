@@ -1,39 +1,47 @@
-import type { TimelineEntry } from "../types";
-import { price, relativeTime, severityStyles, signedPct } from "../format";
+import type { TimelineEntry } from "@/types";
+import { clockTime, price, signedPct } from "@/format";
+import { Card, CardBody, SeverityBadge, Skeleton } from "@/components/ui";
+import { companyName } from "@/universe";
 
 /**
- * What this watchlist surfaced at previous checks.
+ * What this watchlist surfaced at previous checks — a market-event timeline.
  *
- * Grouped by day so the shape of a week is visible at a glance. Entries are
- * records of what was shown at the time, not recomputations, so the wording and
- * score here are exactly what the user read then.
+ * Entries are records of what was shown at the time, not recomputations, so the
+ * wording and score are exactly what the user read then. Grouped by day so the
+ * shape of a week is visible at a glance.
  */
 export function Timeline({
   entries,
   loading,
+  watchedSymbols,
+  onOpenPath,
 }: {
   entries: TimelineEntry[];
   loading: boolean;
+  watchedSymbols: string[];
+  onOpenPath: (symbol: string) => void;
 }) {
   if (loading) {
     return (
       <div className="space-y-2" aria-busy="true">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-14 rounded bg-ink-900 animate-pulse" />
-        ))}
+        <Skeleton className="h-14" />
+        <Skeleton className="h-14" />
+        <Skeleton className="h-14" />
       </div>
     );
   }
 
   if (entries.length === 0) {
     return (
-      <div className="border border-dashed border-ink-700 rounded-lg p-12 text-center">
-        <h2 className="text-lg font-medium text-slate-300">No history yet</h2>
-        <p className="mt-2 text-sm text-slate-500 max-w-sm mx-auto">
-          When you mark a brief as read, whatever it surfaced is recorded here —
-          so you can look back at what mattered on a given day.
-        </p>
-      </div>
+      <Card className="border-dashed">
+        <CardBody className="py-14 text-center">
+          <h2 className="text-lg font-semibold text-ink-900">No history yet</h2>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-ink-500">
+            When you mark a brief as read, whatever it surfaced is recorded here
+            — so you can look back at what mattered on a given day.
+          </p>
+        </CardBody>
+      </Card>
     );
   }
 
@@ -49,71 +57,99 @@ export function Timeline({
     else groups.set(day, [entry]);
   }
 
+  const watched = new Set(watchedSymbols);
+
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-xl font-semibold tracking-tight text-slate-100">
-          What you were told
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+          Market events you were told about
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-ink-500">
           Recorded when each brief was marked as read.
         </p>
       </header>
 
       {[...groups.entries()].map(([day, dayEntries]) => (
         <section key={day}>
-          <h2 className="text-xs uppercase tracking-wider text-slate-500 mb-3">
+          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-400">
             {day}
           </h2>
-          <ol className="border-l border-ink-700 space-y-4 pl-4">
+          <ol className="space-y-2">
             {dayEntries.map((entry) => {
-              const styles = severityStyles[entry.severity];
+              const up = entry.change_pct > 0;
+              const canDrill = watched.has(entry.symbol);
               return (
-                <li key={entry.id} className="relative">
-                  <span
-                    className={`absolute -left-[21px] top-1.5 w-2 h-2 rounded-full ${styles.text.replace(
-                      "text-",
-                      "bg-",
-                    )}`}
-                    aria-hidden="true"
-                  />
-                  <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                    <span className="font-medium text-slate-200">
-                      {entry.symbol}
-                    </span>
-                    <span
-                      className={`text-[11px] uppercase tracking-wider ${styles.text}`}
+                <li key={entry.id}>
+                  <Card
+                    className={
+                      canDrill
+                        ? "cursor-pointer transition-shadow hover:shadow-pop"
+                        : ""
+                    }
+                  >
+                    <button
+                      type="button"
+                      disabled={!canDrill}
+                      onClick={() => canDrill && onOpenPath(entry.symbol)}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left disabled:cursor-default"
                     >
-                      {styles.label}
-                    </span>
-                    <span
-                      className={`tnum text-sm ${
-                        entry.change_pct > 0
-                          ? "text-emerald-400"
-                          : "text-rose-400"
-                      }`}
-                    >
-                      {signedPct(entry.change_pct)}
-                    </span>
-                    <span className="text-xs text-slate-600 tnum">
-                      {price(entry.previous_value)} →{" "}
-                      {price(entry.current_value)}
-                    </span>
-                    <span className="text-xs text-slate-600 ml-auto">
-                      {relativeTime(entry.detected_at)}
-                    </span>
-                  </div>
-                  {entry.reasons.length > 0 && (
-                    <p className="mt-1 text-sm text-slate-400">
-                      {entry.reasons[0].text}
-                      {entry.reasons.length > 1 && (
-                        <span className="text-slate-600">
-                          {" "}
-                          +{entry.reasons.length - 1} more
-                        </span>
+                      <span className="w-12 shrink-0 text-xs tabular-nums text-ink-400">
+                        {clockTime(entry.detected_at)}
+                      </span>
+                      <span
+                        className={
+                          "h-2 w-2 shrink-0 rounded-full " +
+                          (entry.severity === "critical"
+                            ? "bg-sev-critical"
+                            : entry.severity === "high"
+                              ? "bg-sev-high"
+                              : entry.severity === "notable"
+                                ? "bg-sev-notable"
+                                : "bg-sev-quiet")
+                        }
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="font-semibold text-ink-900">
+                            {entry.symbol}
+                          </span>
+                          <span className="truncate text-xs text-ink-400">
+                            {companyName(entry.symbol)}
+                          </span>
+                          <SeverityBadge severity={entry.severity} />
+                        </div>
+                        {entry.reasons.length > 0 && (
+                          <p className="mt-0.5 truncate text-sm text-ink-500">
+                            {entry.reasons[0].text}
+                            {entry.reasons.length > 1 && (
+                              <span className="text-ink-400">
+                                {" "}
+                                +{entry.reasons.length - 1} more
+                              </span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-right tnum">
+                        <div
+                          className={
+                            "text-sm font-semibold " +
+                            (up ? "text-up" : "text-down")
+                          }
+                        >
+                          {signedPct(entry.change_pct)}
+                        </div>
+                        <div className="text-[11px] text-ink-400">
+                          {price(entry.previous_value)} →{" "}
+                          {price(entry.current_value)}
+                        </div>
+                      </div>
+                      {canDrill && (
+                        <span className="shrink-0 text-ink-400">→</span>
                       )}
-                    </p>
-                  )}
+                    </button>
+                  </Card>
                 </li>
               );
             })}

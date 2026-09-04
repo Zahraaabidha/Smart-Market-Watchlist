@@ -43,6 +43,46 @@ from app.persistence.models import (
 # their entire snapshot history into memory to build one brief.
 MAX_LOOKBACK = timedelta(days=7)
 
+# Points kept in the path attached to each attention card. The card sparkline
+# only needs the shape; the full-resolution series is available from the
+# dedicated path endpoint for the detail view.
+CARD_PATH_POINTS = 56
+# Cap for the detail endpoint. Enough to render a smooth line for a multi-day
+# absence without shipping thousands of points.
+DETAIL_PATH_POINTS = 240
+
+
+@dataclass
+class SymbolPath:
+    """The price path across the user's absence window.
+
+    This is what makes the product's signature claim visible: an endpoint
+    comparison shows where a price ended, this shows the route it took. The
+    high and low are the intra-window extremes the engine already scores
+    against -- surfacing them here is serialization, not new logic.
+    """
+
+    points: list[tuple[datetime, Decimal]]
+    checkpoint_at: datetime | None
+    checkpoint_price: Decimal
+    window_high: Decimal
+    window_low: Decimal
+    window_start: datetime
+    window_end: datetime
+
+
+@dataclass
+class SymbolPathDetail(SymbolPath):
+    """Everything the detail view needs, including data-trust fields."""
+
+    symbol: str
+    current_value: Decimal
+    source: str
+    source_timestamp: datetime
+    received_at: datetime | None
+    freshness: str
+    last_checked_at: datetime | None
+
 
 @dataclass
 class BriefResult:
@@ -56,6 +96,46 @@ class BriefResult:
     unavailable_symbols: list[str]
     overall_freshness: str
     window_truncated: bool
+    paths: dict[str, SymbolPath]
+    market_source: str
+
+
+def _downsample(quotes: list[Quote], cap: int) -> list[Quote]:
+    """Thin a series to at most `cap` points, keeping shape and both extremes.
+
+    A plain stride would sometimes drop the exact high or low, which is the one
+    point the path exists to show. Those indices are pinned before striding.
+    """
+    if len(quotes) <= cap:
+        return list(quotes)
+
+    hi = max(range(len(quotes)), key=lambda i: quotes[i].price)
+    lo = min(range(len(quotes)), key=lambda i: quotes[i].price)
+    keep = {0, len(quotes) - 1, hi, lo}
+
+    stride = len(quotes) / cap
+    keep.update(int(i * stride) for i in range(cap))
+    return [quotes[i] for i in sorted(keep)]
+
+
+def _build_path(
+    window: list[Quote],
+    checkpoint_at: datetime | None,
+    window_start: datetime,
+    window_end: datetime,
+    cap: int,
+) -> SymbolPath:
+    prices = [q.price for q in window]
+    sampled = _downsample(window, cap)
+    return SymbolPath(
+        points=[(q.source_timestamp, q.price) for q in sampled],
+        checkpoint_at=checkpoint_at,
+        checkpoint_price=window[0].price,
+        window_high=max(prices),
+        window_low=min(prices),
+        window_start=window_start,
+        window_end=window_end,
+    )
 
 
 def _to_quote(row: MarketSnapshot | LatestQuote) -> Quote:
@@ -103,6 +183,8 @@ def build_brief(
             unavailable_symbols=[],
             overall_freshness=fresh.Freshness.STALE.value,
             window_truncated=False,
+            paths={},
+            market_source="none",
         )
 
     checkpoint = _latest_checkpoint(session, watchlist.id)
@@ -195,6 +277,17 @@ def build_brief(
     quiet: list[DetectedChange] = []
     unavailable: list[str] = []
     freshness_states: list[fresh.Freshness] = []
+    paths: dict[str, SymbolPath] = {}
+
+    # The source actually behind the data being shown, taken from the newest
+    # snapshot rather than assumed -- across a live->replay failover the same
+    # brief can legitimately carry two.
+    considered = [*snapshot_rows, *anchor_rows]
+    market_source = (
+        max(considered, key=lambda r: r.source_timestamp).source
+        if considered
+        else "none"
+    )
 
     for item in items:
         anchor = anchors.get(item.symbol)
@@ -252,6 +345,11 @@ def build_brief(
         freshness_states.append(fresh.Freshness(change.freshness))
         if change_engine.is_meaningful(change):
             attention.append(change)
+            # Only attention cards carry a path -- the quiet list is a compact
+            # "we checked these" table with nothing to plot.
+            paths[item.symbol] = _build_path(
+                window, checkpoint_time, window_start, now, CARD_PATH_POINTS
+            )
         else:
             quiet.append(change)
 
@@ -275,4 +373,82 @@ def build_brief(
         unavailable_symbols=sorted(unavailable),
         overall_freshness=overall.value,
         window_truncated=window_truncated,
+        paths=paths,
+        market_source=market_source,
+    )
+
+
+def build_symbol_path(
+    session: Session,
+    watchlist: Watchlist,
+    symbol: str,
+    now: datetime,
+) -> SymbolPathDetail | None:
+    """Full-resolution price path for one symbol, for the detail view.
+
+    Uses the same window rules as the brief (checkpoint-anchored, bounded to
+    MAX_LOOKBACK, out-of-order rows excluded) so the detail chart and the card
+    sparkline always tell the same story. Returns None when nothing is on
+    record for the symbol.
+    """
+    symbol = symbol.upper()
+
+    checkpoint = _latest_checkpoint(session, watchlist.id)
+    checkpoint_time = checkpoint.checked_at if checkpoint else None
+
+    floor = now - MAX_LOOKBACK
+    window_start = (
+        floor
+        if checkpoint_time is None or checkpoint_time < floor
+        else checkpoint_time
+    )
+
+    rows = session.execute(
+        select(MarketSnapshot)
+        .where(
+            MarketSnapshot.symbol == symbol,
+            MarketSnapshot.source_timestamp >= window_start,
+            MarketSnapshot.source_timestamp <= now,
+            MarketSnapshot.out_of_order.is_(False),
+        )
+        .order_by(MarketSnapshot.source_timestamp)
+    ).scalars().all()
+
+    anchor_row = session.execute(
+        select(MarketSnapshot)
+        .where(
+            MarketSnapshot.symbol == symbol,
+            MarketSnapshot.source_timestamp <= window_start,
+            MarketSnapshot.out_of_order.is_(False),
+        )
+        .order_by(MarketSnapshot.source_timestamp.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    series = ([anchor_row] if anchor_row is not None else []) + list(rows)
+    if not series:
+        return None
+
+    quotes = [_to_quote(r) for r in series]
+    latest = series[-1]
+    assessment = fresh.assess(latest.source_timestamp, now)
+
+    base = _build_path(
+        quotes, checkpoint_time, window_start, now, DETAIL_PATH_POINTS
+    )
+    return SymbolPathDetail(
+        points=base.points,
+        checkpoint_at=base.checkpoint_at,
+        checkpoint_price=base.checkpoint_price,
+        window_high=base.window_high,
+        window_low=base.window_low,
+        window_start=base.window_start,
+        window_end=base.window_end,
+        symbol=symbol,
+        current_value=quotes[-1].price,
+        source=latest.source,
+        source_timestamp=latest.source_timestamp,
+        received_at=latest.received_at,
+        freshness=assessment.state.value,
+        last_checked_at=checkpoint_time,
     )

@@ -1,4 +1,12 @@
-import type { Brief, Item, Preferences, TimelineEntry, Watchlist } from "./types";
+import type {
+  Brief,
+  Item,
+  MarketSource,
+  Preferences,
+  SymbolPathDetail,
+  TimelineEntry,
+  Watchlist,
+} from "./types";
 
 const TOKEN_KEY = "smw.token";
 
@@ -91,6 +99,25 @@ export const api = {
   watchlists: () => request<Watchlist[]>("/watchlists"),
 
   brief: (id: number) => request<Brief>(`/watchlists/${id}/brief`),
+
+  path: (id: number, symbol: string) =>
+    request<SymbolPathDetail>(
+      `/watchlists/${id}/path/${encodeURIComponent(symbol)}`,
+    ),
+
+  marketSource: () => request<MarketSource>("/market/source"),
+
+  demoReplay: () =>
+    request<{ checked_at: string; returned_at: string; away_for: string }>(
+      "/demo/replay",
+      { method: "POST" },
+    ),
+
+  demoProvider: (mode: "replay" | "failing" | "live") =>
+    request<MarketSource>("/demo/provider", {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    }),
 
   timeline: (id: number, limit = 50) =>
     request<TimelineEntry[]>(`/watchlists/${id}/timeline?limit=${limit}`),

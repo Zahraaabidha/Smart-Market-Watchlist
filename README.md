@@ -124,6 +124,66 @@ mid-scroll.
 
 ---
 
+## Seeing the path, not just the endpoints
+
+The brief answers "what changed while I was away" as a screen, not a grid:
+
+- A **hero** states the absence window (`last checked → now`) and the counts —
+  high attention, notable, unchanged.
+- Each **attention card** carries a compact **sparkline** with two markers: the
+  price when you last checked, and the intra-window extreme. A stock that ran
+  +7% and settled at +1% *looks* different from one that drifted to +1%.
+- Drilling into a card opens the **path view**: the full price route across the
+  absence window, with the checkpoint, both intra-window extremes and the
+  current value marked, the absence window shaded, and a plain-language "why
+  this matters" for a round trip an endpoint comparison would have missed.
+
+Two additive, read-only endpoints back this. They serialize data the brief
+service already loads; **no scoring logic changed**.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /watchlists/{id}/brief` → `attention[].path` | downsampled path per card (~56 points, true high/low always kept) |
+| `GET /watchlists/{id}/path/{symbol}` | full-resolution path + `source` / `source_timestamp` / `received_at` / `freshness` for the detail view |
+
+The sparklines are hand-rolled inline SVG — no charting dependency — because a
+chart in every card is exactly the density this product is trying to avoid. The
+one full chart lives in the path view.
+
+---
+
+## Data freshness and source, shown honestly
+
+The replay provider simulates a market; **it is never labelled "Live"**. The UI
+says **"Replay data"** (or **"Replay · stale"**), and the header carries a
+source chip that reads `Replay data`, `Live market data`, or `Degraded`.
+
+`GET /market/source` reports what is actually feeding the product —
+`provider`, `mode`, `degraded`, `degraded_reason`, `last_poll_at`,
+`last_success_at` — read from process state written by the ingestion loop, with
+no database hit.
+
+### Optional live provider
+
+`MarketDataProvider` has two implementations behind it:
+
+```
+MarketDataProvider
+├── ReplayMarketDataProvider   deterministic, no credentials, always the fallback
+└── TwelveDataProvider          live vendor (NSE/BSE), wrapped by FallbackProvider
+```
+
+`FallbackProvider` tries the live vendor and, on any `MarketDataError`,
+transparently serves replay data and flips `degraded = true`. `.name` proxies to
+whichever provider actually served, so every persisted snapshot's `source`
+column stays truthful across a mid-stream failover.
+
+Enabled with `MARKET_PROVIDER=live` **and** `TWELVE_DATA_API_KEY` set — no key,
+no live mode, and the app logs a warning and stays on replay rather than
+failing to start. There is no hardcoded key.
+
+---
+
 ## Data freshness as a first-class concept
 
 Freshness is always derived from the **source timestamp** — when the market
@@ -287,6 +347,14 @@ python -m app.demo --live    # same market, anchored to now, seeds a UI account
 `--live` seeds `demo@example.com` / `demo-password-123`. Sign in with it to see
 a populated brief immediately.
 
+**In the app:** when `DEMO_MODE=true`, the header shows a **Run demo** button.
+It seeds the signed-in account's watchlist with the replay universe, backfills
+history, and records a checkpoint three hours in the past — reproducing
+*check → away → return → explained* without leaving the browser.
+`POST /api/demo/provider {"mode":"failing"}` forces a provider outage so the
+degraded fallback path is visible on demand. Both routes are only mounted in
+demo mode.
+
 ### Manual setup
 
 ```bash
@@ -316,9 +384,12 @@ watchlist so the brief is never an empty page.
 | `SECRET_KEY` | demo value | JWT signing key |
 | `INGEST_INTERVAL_SECONDS` | `15` | Shared polling cadence |
 | `BASELINE_WINDOW_SIZE` | `40` | Observations retained per baseline |
+| `MARKET_PROVIDER` | `replay` | `live` wraps Twelve Data with a replay fallback |
+| `TWELVE_DATA_API_KEY` | — | Required for `MARKET_PROVIDER=live`; no key ⇒ stays on replay |
+| `TWELVE_DATA_EXCHANGE` | `NSE` | Exchange qualifier for the live vendor |
 
 No secret is hardcoded. The app runs fully in demo mode without external
-credentials.
+credentials, and the live provider is opt-in.
 
 ---
 
@@ -377,10 +448,16 @@ silently erase exactly the changes they came back for.
 
 ## Known limitations
 
-- The replay provider simulates a market; it is not live data. A live provider
-  implements the same interface with no changes above `integrations/`.
+- The default provider simulates a market; it is not live data, and the UI says
+  so. A `TwelveDataProvider` implements the same interface for a real NSE/BSE
+  feed, wrapped by a replay fallback — but free-tier Indian-market coverage and
+  rate limits make it best-effort, which is why replay stays the default.
 - Baselines are computed from the replay history rather than true daily OHLC
   bars, so "normal volatility" reflects the simulated series.
+- The path view uses a hand-rolled SVG chart, not a charting library. It draws
+  exactly the marks the feature needs (checkpoint, both extremes, absence band)
+  and adds nothing to the bundle; a library would be justified only once the
+  product needs many chart types.
 - One watchlist per user is surfaced in the UI, though the schema and API
   support many.
 - History records only meaningful changes. Keeping a row per quiet symbol per

@@ -4,14 +4,22 @@
 
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
   body {
-    @apply bg-ink-950 text-slate-200 antialiased;
+    @apply bg-canvas text-ink-900 antialiased;
+    font-feature-settings: "cv05", "cv08", "ss03";
   }
   /* Tabular figures stop prices from jittering horizontally as they update,
      which is distracting on a screen the user is scanning for changes. */
   .tnum {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* A hairline that reads as a border but is sub-pixel crisp on retina. */
+  .divide-line > * + * {
+    border-color: theme("colors.line");
   }
 }

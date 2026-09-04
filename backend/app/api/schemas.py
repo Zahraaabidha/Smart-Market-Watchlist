@@ -127,6 +127,28 @@ class ReasonResponse(BaseModel):
     contribution: float
 
 
+class PathPoint(BaseModel):
+    t: datetime
+    price: Decimal
+
+
+class PricePath(BaseModel):
+    """The route a price took across the user's absence window.
+
+    `window_high` / `window_low` are the intra-window extremes the engine
+    scores against; surfacing them lets the UI mark the peak of a swing that an
+    endpoint comparison would hide.
+    """
+
+    points: list[PathPoint]
+    checkpoint_at: datetime | None
+    checkpoint_price: Decimal
+    window_high: Decimal
+    window_low: Decimal
+    window_start: datetime
+    window_end: datetime
+
+
 class ChangeResponse(BaseModel):
     symbol: str
     change_type: str
@@ -140,6 +162,9 @@ class ChangeResponse(BaseModel):
     freshness: str
     priority: int
     reasons: list[ReasonResponse]
+    # Present for attention items only; the quiet list has nothing to plot.
+    source: str | None = None
+    path: PricePath | None = None
 
 
 class BriefResponse(BaseModel):
@@ -154,6 +179,35 @@ class BriefResponse(BaseModel):
     unavailable_symbols: list[str]
     overall_freshness: str
     window_truncated: bool
+    # The source actually behind the data shown ("replay", "twelvedata", ...).
+    market_source: str
+    degraded: bool = False
+
+
+class SymbolPathResponse(PricePath):
+    """Full-resolution path plus the data-trust fields for the detail view."""
+
+    symbol: str
+    current_value: Decimal
+    source: str
+    source_timestamp: datetime
+    received_at: datetime | None
+    freshness: str
+    last_checked_at: datetime | None
+
+
+class MarketSourceResponse(BaseModel):
+    provider: str
+    mode: str
+    degraded: bool
+    degraded_reason: str | None
+    last_poll_at: datetime | None
+    last_success_at: datetime | None
+    demo_mode: bool
+
+
+class DemoProviderRequest(BaseModel):
+    mode: str = Field(pattern=r"^(replay|failing|live)$")
 
 
 class TimelineEntry(BaseModel):

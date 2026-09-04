@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
@@ -12,8 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import router
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.integrations.fallback import FallbackProvider
+from app.integrations.provider import MarketDataProvider
 from app.integrations.replay import ReplayProvider
 from app.persistence.db import SessionLocal, engine
 from app.persistence.models import Base
@@ -24,9 +27,46 @@ from app.services.watchlists import all_watched_symbols
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
+@dataclass
+class MarketStatus:
+    """What the last ingestion pass observed, for the /market/source endpoint."""
+
+    mode: str = "replay"
+    last_poll_at: datetime | None = None
+    last_success_at: datetime | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
+
+
+def build_provider(cfg: Settings) -> MarketDataProvider:
+    """Choose the market data provider from configuration.
+
+    Replay is the default and always the fallback: it needs no credentials and
+    is deterministic. "live" wraps Twelve Data but only if a key is actually
+    present -- a misconfigured live mode degrades to replay with a warning
+    rather than failing to start.
+    """
+    if cfg.market_provider == "live" and cfg.twelve_data_api_key:
+        # Imported lazily so a replay-only deployment never imports httpx.
+        from app.integrations.twelve_data import TwelveDataProvider
+
+        primary = TwelveDataProvider(
+            api_key=cfg.twelve_data_api_key,
+            exchange=cfg.twelve_data_exchange,
+        )
+        return FallbackProvider(primary, ReplayProvider())
+
+    if cfg.market_provider == "live":
+        logger.warning(
+            "MARKET_PROVIDER=live but TWELVE_DATA_API_KEY is unset; using replay"
+        )
+    return ReplayProvider()
+
+
 # One provider instance for the process. Held on the app so demo controls and
 # tests can swap it without reaching into module state.
-provider = ReplayProvider()
+provider = build_provider(settings)
 
 
 async def _ingestion_loop(app: FastAPI) -> None:
@@ -71,6 +111,21 @@ def _run_one_pass(app: FastAPI) -> None:
 
         result = poll_and_ingest(session, app.state.provider, symbols, now)
         session.commit()
+
+        # Record what this pass observed so /market/source can report it
+        # without touching the database. `name` on a FallbackProvider already
+        # proxies to whichever provider actually served.
+        prov = app.state.provider
+        status: MarketStatus = app.state.market_status
+        status.last_poll_at = now
+        status.mode = getattr(prov, "name", "replay")
+        status.degraded = bool(getattr(prov, "degraded", False)) or result.provider_failed
+        status.degraded_reason = getattr(prov, "degraded_reason", None) or (
+            "provider returned no data" if result.provider_failed else None
+        )
+        if not result.provider_failed and (result.inserted or result.duplicates):
+            status.last_success_at = now
+
         if result.out_of_order or result.provider_failed:
             logger.info(
                 "ingest: inserted=%s duplicates=%s out_of_order=%s failed=%s",
@@ -85,6 +140,9 @@ def _run_one_pass(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     app.state.provider = provider
+    app.state.market_status = MarketStatus(
+        mode=getattr(provider, "name", "replay")
+    )
 
     task = asyncio.create_task(_ingestion_loop(app))
     try:
