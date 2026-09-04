@@ -132,6 +132,20 @@ def add_item(
             f"a watchlist may hold at most {MAX_ITEMS_PER_WATCHLIST} symbols"
         )
 
+    # Lock the watchlist row before computing the next position. Without
+    # this, two concurrent adds of *different* symbols can both run the
+    # SELECT max(position) below before either has committed its INSERT, so
+    # both compute the same value and land on the same position -- the
+    # per-symbol unique constraint above only catches two writers racing to
+    # add the *same* symbol, not this. A second concurrent add_item for this
+    # watchlist simply waits here until the first transaction commits (and
+    # releases the lock), then sees the committed row and computes a
+    # genuinely new max. Nothing else (get_owned_watchlist's own reads,
+    # other watchlists) is affected.
+    session.execute(
+        select(Watchlist.id).where(Watchlist.id == watchlist.id).with_for_update()
+    )
+
     next_position = session.execute(
         select(func.coalesce(func.max(WatchlistItem.position), -1) + 1).where(
             WatchlistItem.watchlist_id == watchlist.id
