@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Item, Preferences, Watchlist } from "@/types";
-import { Button, Card, CardBody, SectionLabel } from "@/components/ui";
+import { Button, Card, CardBody, SectionLabel, Select } from "@/components/ui";
 import { companyName } from "@/universe";
 
 /**
@@ -8,9 +8,6 @@ import { companyName } from "@/universe";
  * unchanged — the `view` prop just picks which half to show so the sidebar can
  * route "Watchlist" (symbols) and "Manage" (sensitivities) separately.
  */
-const selectCls =
-  "rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-sm text-ink-700 " +
-  "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25";
 
 export function WatchlistPanel({
   view,
@@ -84,15 +81,14 @@ export function WatchlistPanel({
                 "text-ink-900 placeholder:text-ink-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
               }
             />
-            <select
+            <Select
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value))}
-              className={selectCls}
             >
               <option value={1}>High priority</option>
               <option value={2}>Normal</option>
               <option value={3}>Low priority</option>
-            </select>
+            </Select>
             <Button type="submit" variant="primary" disabled={busy || !symbol.trim()}>
               Add
             </Button>
@@ -155,20 +151,21 @@ export function WatchlistPanel({
                     </span>
                   )}
 
-                  <select
+                  <Select
+                    size="sm"
                     value={item.priority}
                     onChange={(e) =>
                       void onUpdateItem(item.id, {
                         priority: Number(e.target.value),
                       })
                     }
-                    className={selectCls + " shrink-0 py-1 text-xs"}
+                    className="shrink-0"
                     aria-label={`Priority for ${item.symbol}`}
                   >
                     <option value={1}>High</option>
                     <option value={2}>Normal</option>
                     <option value={3}>Low</option>
-                  </select>
+                  </Select>
 
                   <button
                     onClick={() => void onRemove(item.id)}
@@ -257,10 +254,65 @@ function SensitivityCard({
 }) {
   const [local, setLocal] = useState(value);
   const [dragging, setDragging] = useState(false);
+
+  // The value we've told the parent to persist but haven't yet seen echoed
+  // back through `value`, plus when we started waiting. Set the instant the
+  // user moves the slider (pointer *or* keyboard) and cleared once `value`
+  // confirms it landed.
+  //
+  // Root cause this guards against: `value` comes from server state that is
+  // refetched both after our own save *and* on an unrelated 20s background
+  // poll. That refetch can — and routinely does — land while our own save is
+  // still in flight, so the effect below would otherwise see a `value` that
+  // still reflects the pre-edit number and snap `local` back to it right
+  // after the user let go. The slider then appeared to ignore the first
+  // interaction, and only "took" on a second attempt once the round trip from
+  // the first attempt had finally caught up. Comparing against the value we
+  // ourselves last sent — rather than trusting every incoming prop — means a
+  // stale/irrelevant response is ignored instead of overwriting a newer edit.
+  //
+  // The wait is bounded: `onCommit` reports success/failure through this
+  // app's shared mutate() helper, which already turns a failed save into a
+  // banner rather than a rejected promise, so we can't rely on a rejection to
+  // know a save was lost. If nothing has confirmed our value within
+  // PENDING_TIMEOUT_MS, we stop protecting it and trust the server's answer
+  // again — a lost write still self-corrects on the next poll instead of
+  // leaving the control stuck forever on an unsaved number.
+  const pendingRef = useRef<{ value: number; at: number } | null>(null);
+  const PENDING_TIMEOUT_MS = 8000; // well under the 20s background refresh
+
   useEffect(() => {
-    if (!dragging) setLocal(value);
+    if (dragging) return;
+    const pending = pendingRef.current;
+    if (pending) {
+      if (value === pending.value) {
+        pendingRef.current = null; // confirmed; fall through and sync
+      } else if (Date.now() - pending.at < PENDING_TIMEOUT_MS) {
+        return; // still trust our more-recent edit over this stale echo
+      } else {
+        pendingRef.current = null; // gave up waiting; trust the server again
+      }
+    }
+    setLocal(value);
   }, [value, dragging]);
+
   const pct = ((local - min) / (max - min)) * 100;
+
+  function handleChange(next: number) {
+    // Mark this as "ours" immediately (not just at release) so a background
+    // refresh landing mid-drag — pointer *or* a held keyboard key, which
+    // never sets `dragging` — can't interrupt what's on screen.
+    pendingRef.current = { value: next, at: Date.now() };
+    setLocal(next);
+  }
+
+  function commit(next: number) {
+    // Re-stamp at the moment the request actually goes out, so the timeout
+    // budget above measures from "asked the server to save" rather than from
+    // an earlier drag tick.
+    pendingRef.current = { value: next, at: Date.now() };
+    onCommit(next);
+  }
 
   return (
     <Card>
@@ -278,13 +330,13 @@ function SensitivityCard({
           max={max}
           step={step}
           value={local}
-          onChange={(e) => setLocal(Number(e.target.value))}
+          onChange={(e) => handleChange(Number(e.target.value))}
           onPointerDown={() => setDragging(true)}
           onPointerUp={() => {
             setDragging(false);
-            onCommit(local);
+            commit(local);
           }}
-          onKeyUp={() => onCommit(local)}
+          onKeyUp={() => commit(local)}
           aria-label={label}
           className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none
                      [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4

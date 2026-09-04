@@ -85,6 +85,8 @@ export function Timeline({
               {rows.map((entry) => {
                 const up = entry.change_pct > 0;
                 const canDrill = watched.has(entry.symbol);
+                const company = companyName(entry.symbol);
+                const reason = leadReason(entry.reasons);
                 return (
                   <li key={entry.id}>
                     <button
@@ -93,33 +95,36 @@ export function Timeline({
                       onClick={() => canDrill && onOpenPath(entry.symbol)}
                       className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors enabled:hover:bg-sunk/50 disabled:cursor-default"
                     >
-                      <span className="w-11 shrink-0 tabular-nums text-[11px] text-ink-400">
+                      <span className="w-14 shrink-0 whitespace-nowrap tabular-nums text-[11px] text-ink-400">
                         {clockTime(entry.detected_at)}
                       </span>
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot[entry.severity]}`}
                       />
-                      <span className="w-24 shrink-0 font-semibold text-ink-900">
+                      <span
+                        className="w-20 shrink-0 truncate font-semibold text-ink-900 sm:w-28"
+                        title={entry.symbol}
+                      >
                         {entry.symbol}
                       </span>
-                      <span className="hidden w-40 shrink-0 truncate text-[11px] text-ink-400 md:block">
-                        {companyName(entry.symbol) ?? ""}
-                      </span>
-                      <span className="hidden shrink-0 sm:block">
+                      <span className="hidden w-20 shrink-0 sm:block">
                         <SeverityBadge severity={entry.severity} />
                       </span>
                       <span
-                        className={`w-16 shrink-0 text-right font-semibold tabular-nums ${
+                        className={`w-20 shrink-0 whitespace-nowrap text-right font-semibold tabular-nums ${
                           up ? "text-up" : "text-down"
                         }`}
                       >
                         {signedPct(entry.change_pct)}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-[11px] text-ink-500">
-                        since last review
-                        {leadReason(entry.reasons) && (
-                          <> · {leadReason(entry.reasons)}</>
+                        {company && (
+                          <span className="hidden text-ink-400 md:inline">
+                            {company} ·{" "}
+                          </span>
                         )}
+                        since last review
+                        {reason && <> · {reason}</>}
                         {entry.reasons.length > 1 && (
                           <span className="text-ink-400">
                             {" "}
@@ -127,10 +132,10 @@ export function Timeline({
                           </span>
                         )}
                       </span>
-                      <span className="hidden w-28 shrink-0 text-right text-[11px] tabular-nums text-ink-400 lg:block">
+                      <span className="hidden w-40 shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-ink-400 lg:block">
                         {price(entry.previous_value)} → {price(entry.current_value)}
                       </span>
-                      <span className="w-3 shrink-0 text-right text-ink-300">
+                      <span className="w-4 shrink-0 text-right text-ink-300">
                         {canDrill ? "›" : ""}
                       </span>
                     </button>

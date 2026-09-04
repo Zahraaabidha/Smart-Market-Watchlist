@@ -66,16 +66,16 @@ export function MarketBrief({
 
   return (
     <div className="space-y-3">
-      {/* ── HERO ─────────────────────────────────────────────── */}
-      <Card>
-        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+      {/* ── HERO — page header, not a dashboard card ──────────── */}
+      <header className="border-b border-line pb-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-400">
               {brief.last_checked_at
                 ? `While you were away · ${durationBetween(brief.last_checked_at, brief.generated_at)}`
                 : "First visit"}
             </p>
-            <h1 className="mt-1.5 text-[22px] font-semibold leading-tight tracking-tight text-ink-900 sm:text-[26px]">
+            <h1 className="mt-1.5 text-[26px] font-semibold leading-tight tracking-tight text-ink-900 sm:text-[30px]">
               {n > 0
                 ? "Here's what changed while you were away."
                 : "Nothing needs your attention."}
@@ -102,12 +102,12 @@ export function MarketBrief({
           </div>
         </div>
         {justReviewedAt && (
-          <div className="border-t border-line bg-sunk/60 px-5 py-2.5 text-xs font-medium text-ink-600">
+          <div className="mt-4 rounded-lg bg-sunk/70 px-3.5 py-2.5 text-xs font-medium text-ink-600">
             Review saved. Your next brief will compare from{" "}
             {clockTime(justReviewedAt)}.
           </div>
         )}
-      </Card>
+      </header>
 
       {/* ── trust banners ────────────────────────────────────── */}
       {brief.overall_freshness === "stale" && (

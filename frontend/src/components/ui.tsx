@@ -10,6 +10,7 @@ import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
   type ReactNode,
+  type SelectHTMLAttributes,
   useId,
   useState,
 } from "react";
@@ -88,6 +89,53 @@ export function Button({
       )}
       {...props}
     />
+  );
+}
+
+/* --- Select ----------------------------------------------------------- */
+
+type SelectProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, "size"> & {
+  /** Sizes the control itself; the wrapping element still takes `className`. */
+  size?: "sm" | "md";
+};
+
+/**
+ * A native `<select>` restyled to look like a purpose-built control rather
+ * than a browser default — same value/onChange/option semantics as a plain
+ * select, just with a custom chevron and finished states layered on top.
+ */
+export function Select({ className, size = "md", ...props }: SelectProps) {
+  return (
+    <div className={cn("relative inline-flex", className)}>
+      <select
+        {...props}
+        className={cn(
+          "peer w-full appearance-none rounded-lg border border-line-strong bg-surface font-medium text-ink-700 shadow-card outline-none transition-colors",
+          "hover:border-ink-400/70 hover:bg-sunk/40",
+          "focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/25",
+          "active:bg-sunk/70",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          size === "sm" ? "py-1 pl-2.5 pr-6 text-xs" : "py-2 pl-3 pr-8 text-sm",
+        )}
+      />
+      <svg
+        viewBox="0 0 12 12"
+        fill="none"
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-ink-400 transition-colors peer-hover:text-ink-600 peer-focus-visible:text-accent",
+          size === "sm" ? "right-2 h-3 w-3" : "right-2.5 h-3.5 w-3.5",
+        )}
+      >
+        <path
+          d="M3 4.5L6 7.25L9 4.5"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
   );
 }
 

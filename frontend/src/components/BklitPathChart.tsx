@@ -244,13 +244,14 @@ function PathMarkers({
   const nw = at(now);
 
   // Nudge a marker a hair off any other it would sit directly on top of.
+  // Thresholds/step scaled up slightly alongside the larger marker radii below.
   const dodge = (
     a: { x: number; y: number },
     others: { x: number; y: number }[],
   ) => {
     let dx = 0;
     for (const o of others) {
-      if (Math.abs(a.x - o.x) < 6 && Math.abs(a.y - o.y) < 6) dx += 5;
+      if (Math.abs(a.x - o.x) < 8 && Math.abs(a.y - o.y) < 8) dx += 7;
     }
     return { x: a.x + dx, y: a.y };
   };
@@ -261,39 +262,37 @@ function PathMarkers({
   const ok = (pt: { x: number; y: number }) =>
     Number.isFinite(pt.x) && Number.isFinite(pt.y);
 
+  // A marker is a small ring (or filled dot) sitting on a white halo a couple
+  // of px wider, so it stays legible wherever the line or grid falls behind
+  // it. The halo carries a hairline border of its own rather than sitting
+  // starkly on the canvas.
+  const marker = (
+    pt: { x: number; y: number },
+    { r, haloR, stroke, strokeWidth = 2.1, fill = "#fff" }: {
+      r: number;
+      haloR: number;
+      stroke?: string;
+      strokeWidth?: number;
+      fill?: string;
+    },
+  ) =>
+    ok(pt) && (
+      <>
+        <circle cx={pt.x} cy={pt.y} r={haloR} fill="#fff" stroke="#eef0f3" strokeWidth={1} />
+        <circle cx={pt.x} cy={pt.y} r={r} fill={fill} stroke={stroke} strokeWidth={stroke ? strokeWidth : 0} />
+      </>
+    );
+
   return (
     <g className="chart-path-markers" pointerEvents="none">
-      {ok(cN) && (
-        <circle
-          cx={cN.x}
-          cy={cN.y}
-          r={3.4}
-          fill="#fff"
-          stroke="#8b91a3"
-          strokeWidth={1.6}
-        />
-      )}
-      {ok(hN) && (
-        <circle
-          cx={hN.x}
-          cy={hN.y}
-          r={3.6}
-          fill="#fff"
-          stroke={UP}
-          strokeWidth={1.9}
-        />
-      )}
-      {ok(lN) && (
-        <circle
-          cx={lN.x}
-          cy={lN.y}
-          r={3.6}
-          fill="#fff"
-          stroke={DOWN}
-          strokeWidth={1.9}
-        />
-      )}
-      {ok(nw) && <circle cx={nw.x} cy={nw.y} r={4.2} fill={color} />}
+      {/* checkpoint — stays smaller/hollow */}
+      {marker(cN, { r: 3.4, haloR: 5.4, stroke: "#8b91a3", strokeWidth: 1.6 })}
+      {/* intra-window high — ~1.5x the old radius, white halo underneath */}
+      {marker(hN, { r: 5.4, haloR: 7.4, stroke: UP })}
+      {/* intra-window low — ~1.5x the old radius, white halo underneath */}
+      {marker(lN, { r: 5.4, haloR: 7.4, stroke: DOWN })}
+      {/* now — slightly larger, filled, with the same halo treatment */}
+      {marker(nw, { r: 4.8, haloR: 7.6, fill: color })}
     </g>
   );
 }
