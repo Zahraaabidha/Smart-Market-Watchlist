@@ -121,3 +121,67 @@ class TestSymbolPathDetail:
         wl.record_checkpoint(session, user, watchlist.id, T0, "cp")
 
         assert build_symbol_path(session, watchlist, "EMPTY", datetime.now(timezone.utc)) is None
+
+    def test_a_real_ingestion_gap_is_flagged_not_bridged(self, session, user):
+        """End-to-end regression for the "artificial straight-line segment"
+        bug: seed a normal dense intraday run, then a genuine break in data
+        collection (as if the ingestion loop was down), then a single fresh
+        quote -- the exact shape RELIANCE/ZOMATO showed in production. The
+        path must carry the gap honestly (flagged on the point after it, nothing
+        invented to bridge it) rather than silently connecting through it.
+        """
+        symbol = "GAPSYM"
+
+        # Dense run: two hours of real ticks at the actual ingestion cadence,
+        # starting strictly after the checkpoint so there is no ambiguity
+        # with the separate "anchor row at the window boundary" behaviour --
+        # this test is about the gap, not that boundary case.
+        dense = [
+            Quote(
+                symbol,
+                Decimal("100") + Decimal(i % 7),
+                1_000_000,
+                T0 + timedelta(seconds=15 * (i + 1)),
+            )
+            for i in range(480)  # 480 * 15s = 2h
+        ]
+        dense_end = dense[-1].source_timestamp
+
+        # A genuine gap: the ingestion loop was effectively down for 90
+        # minutes -- no rows at all in this stretch, exactly like a real
+        # process restart or provider outage.
+        resume = dense_end + timedelta(minutes=90)
+        current = Quote(symbol, Decimal("129.50"), 1_000_000, resume)
+
+        ingest_quotes(session, [*dense, current], source="replay", historical=True)
+
+        watchlist = _watchlist_with(session, user, symbol)
+        wl.record_checkpoint(session, user, watchlist.id, T0, "cp")
+        now = resume
+
+        detail = build_symbol_path(session, watchlist, symbol, now)
+
+        assert detail is not None
+        assert len(detail.points) > 2  # the dense run actually came through
+
+        flagged = [(t, p) for t, p, gap_before in detail.points if gap_before]
+        assert len(flagged) == 1, (
+            "exactly one break in the series must be flagged -- neither "
+            "silently bridged nor split into more gaps than actually exist"
+        )
+        gap_t, gap_p = flagged[0]
+        assert gap_t == resume
+        # the flagged point's price is the real, received quote -- not an
+        # interpolation between the pre-gap price and it.
+        assert gap_p == Decimal("129.50")
+
+        # Nothing before the gap is itself (mis)flagged.
+        assert all(
+            not gap_before for t, _, gap_before in detail.points if t < resume
+        )
+
+        # True values are untouched by the gap.
+        assert detail.current_value == Decimal("129.50")
+        assert detail.window_high == max(q.price for q in dense + [current])
+        assert detail.window_low == min(q.price for q in dense + [current])
+        assert detail.source == "replay"

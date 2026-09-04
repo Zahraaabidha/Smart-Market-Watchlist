@@ -62,7 +62,11 @@ class SymbolPath:
     against -- surfacing them here is serialization, not new logic.
     """
 
-    points: list[tuple[datetime, Decimal]]
+    # (timestamp, price, gap_before) -- `gap_before` is True when this point
+    # follows a genuine break in data collection (see `_gap_threshold`) rather
+    # than the previous point in the series. The first point is never marked:
+    # there is nothing before it in the returned series to have gapped from.
+    points: list[tuple[datetime, Decimal, bool]]
     checkpoint_at: datetime | None
     checkpoint_price: Decimal
     window_high: Decimal
@@ -100,14 +104,17 @@ class BriefResult:
     market_source: str
 
 
-def _downsample(quotes: list[Quote], cap: int) -> list[Quote]:
-    """Thin a series to at most `cap` points, keeping shape and both extremes.
+def _downsample_indices(quotes: list[Quote], cap: int) -> list[int]:
+    """Indices `_downsample` keeps, in order.
 
-    A plain stride would sometimes drop the exact high or low, which is the one
-    point the path exists to show. Those indices are pinned before striding.
+    Split out from `_downsample` so gap detection (below) can be computed
+    against the exact same selection without re-deriving it, and so a caller
+    that needs to reason about what got thinned out between two kept points
+    (as opposed to what never existed at all) has the original indices to
+    work with.
     """
     if len(quotes) <= cap:
-        return list(quotes)
+        return list(range(len(quotes)))
 
     hi = max(range(len(quotes)), key=lambda i: quotes[i].price)
     lo = min(range(len(quotes)), key=lambda i: quotes[i].price)
@@ -115,7 +122,30 @@ def _downsample(quotes: list[Quote], cap: int) -> list[Quote]:
 
     stride = len(quotes) / cap
     keep.update(int(i * stride) for i in range(cap))
-    return [quotes[i] for i in sorted(keep)]
+    return sorted(keep)
+
+
+def _downsample(quotes: list[Quote], cap: int) -> list[Quote]:
+    """Thin a series to at most `cap` points, keeping shape and both extremes.
+
+    A plain stride would sometimes drop the exact high or low, which is the one
+    point the path exists to show. Those indices are pinned before striding.
+    """
+    return [quotes[i] for i in _downsample_indices(quotes, cap)]
+
+
+def _gap_threshold() -> timedelta:
+    """How wide a silence has to be before it's a genuine data gap.
+
+    Set generously above the configured poll cadence (never below 3 minutes)
+    so ordinary jitter -- a slow poll, a couple of skipped duplicate ticks --
+    is never mistaken for missing data. Below this, consecutive quotes are
+    just consecutive quotes; above it, nothing was actually collected for
+    that stretch (the ingestion loop was down, the provider was unreachable,
+    etc.) and the chart must say so rather than draw through it.
+    """
+    interval = get_settings().ingest_interval_seconds
+    return timedelta(seconds=max(interval * 8, 180))
 
 
 def _build_path(
@@ -126,9 +156,28 @@ def _build_path(
     cap: int,
 ) -> SymbolPath:
     prices = [q.price for q in window]
-    sampled = _downsample(window, cap)
+
+    # Gap detection runs on the *full-resolution* window, before downsampling.
+    # A long window downsampled to `cap` points can legitimately put many real
+    # minutes between two kept points -- that is thinning, not a gap, and the
+    # only way to tell the two apart is to look at what was actually collected
+    # in between before any of it gets thinned away.
+    threshold = _gap_threshold()
+    gap_after = [
+        window[i + 1].source_timestamp - window[i].source_timestamp > threshold
+        for i in range(len(window) - 1)
+    ]
+
+    indices = _downsample_indices(window, cap)
+    points: list[tuple[datetime, Decimal, bool]] = []
+    for pos, idx in enumerate(indices):
+        gap_before = pos > 0 and any(
+            gap_after[k] for k in range(indices[pos - 1], idx)
+        )
+        points.append((window[idx].source_timestamp, window[idx].price, gap_before))
+
     return SymbolPath(
-        points=[(q.source_timestamp, q.price) for q in sampled],
+        points=points,
         checkpoint_at=checkpoint_at,
         checkpoint_price=window[0].price,
         window_high=max(prices),

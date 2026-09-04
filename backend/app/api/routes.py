@@ -312,7 +312,10 @@ def get_symbol_path(
 
     return schemas.SymbolPathResponse(
         symbol=path.symbol,
-        points=[schemas.PathPoint(t=t, price=p) for t, p in path.points],
+        points=[
+            schemas.PathPoint(t=t, price=p, gap_before=gap)
+            for t, p, gap in path.points
+        ],
         checkpoint_at=path.checkpoint_at,
         checkpoint_price=path.checkpoint_price,
         window_high=path.window_high,
@@ -410,7 +413,10 @@ def get_timeline(
 
 def _path_to_schema(path) -> schemas.PricePath:
     return schemas.PricePath(
-        points=[schemas.PathPoint(t=t, price=p) for t, p in path.points],
+        points=[
+            schemas.PathPoint(t=t, price=p, gap_before=gap)
+            for t, p, gap in path.points
+        ],
         checkpoint_at=path.checkpoint_at,
         checkpoint_price=path.checkpoint_price,
         window_high=path.window_high,

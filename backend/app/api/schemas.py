@@ -130,6 +130,11 @@ class ReasonResponse(BaseModel):
 class PathPoint(BaseModel):
     t: datetime
     price: Decimal
+    # True when this point follows a genuine break in data collection (the
+    # ingestion loop was down, the provider was unreachable, ...) rather than
+    # the previous point in the series. The client must not draw a connecting
+    # line across it. Never True on the first point of a series.
+    gap_before: bool = False
 
 
 class PricePath(BaseModel):

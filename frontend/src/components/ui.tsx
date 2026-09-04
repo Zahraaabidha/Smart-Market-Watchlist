@@ -9,9 +9,11 @@
 import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
+  type KeyboardEvent,
   type ReactNode,
-  type SelectHTMLAttributes,
+  useEffect,
   useId,
+  useRef,
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -92,49 +94,214 @@ export function Button({
   );
 }
 
-/* --- Select ----------------------------------------------------------- */
+/* --- Listbox (custom "select") ----------------------------------------- */
 
-type SelectProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, "size"> & {
-  /** Sizes the control itself; the wrapping element still takes `className`. */
+export interface ListboxOption<T extends string | number> {
+  value: T;
+  label: string;
+}
+
+interface ListboxProps<T extends string | number> {
+  value: T;
+  onChange: (value: T) => void;
+  options: ListboxOption<T>[];
+  /** Sizes the trigger; menu rows keep a comfortable size regardless. */
   size?: "sm" | "md";
-};
+  className?: string;
+  disabled?: boolean;
+  "aria-label"?: string;
+}
 
 /**
- * A native `<select>` restyled to look like a purpose-built control rather
- * than a browser default — same value/onChange/option semantics as a plain
- * select, just with a custom chevron and finished states layered on top.
+ * A hand-rolled dropdown standing in for a native `<select>`.
+ *
+ * A native select can only ever be half-styled: the closed trigger is a real
+ * element in the page and takes CSS fine, but the instant it opens, the
+ * option list is drawn by the OS/browser shell *outside* the page — no CSS
+ * reaches it, which is why it always shows the platform's own font and its
+ * own (usually bright, OS-blue) highlight no matter how the control itself
+ * is styled. This renders the open menu in-page instead, so every pixel of
+ * it — background, border, hover state — is ours.
+ *
+ * Follows the ARIA "collapsible dropdown listbox" pattern: a `button` with
+ * `aria-haspopup="listbox"`/`aria-expanded`, and while open,
+ * `aria-activedescendant` tracks the highlighted option without ever moving
+ * DOM focus off the button — so Escape, the arrow keys, and Enter all just
+ * work without a separate focus-trap.
  */
-export function Select({ className, size = "md", ...props }: SelectProps) {
+export function Listbox<T extends string | number>({
+  value,
+  onChange,
+  options,
+  size = "md",
+  className,
+  disabled,
+  "aria-label": ariaLabel,
+}: ListboxProps<T>) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listboxId = useId();
+  const optionId = (i: number) => `${listboxId}-opt-${i}`;
+
+  const selectedIndex = options.findIndex((o) => o.value === value);
+  const selected = options[selectedIndex] ?? options[0];
+
+  // Close on an outside click. `mousedown`, not `click`, so that clicking a
+  // *different* row's trigger closes this one before that row's own click
+  // handler opens it — two of these never end up open at once from a single
+  // click, and one row's menu never reaches into another's.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  // Flip above the trigger when there isn't room below. A rough pre-paint
+  // estimate of the menu's height is enough here — the option list is short
+  // and a fixed row height — and avoids the flicker of a measure-then-move
+  // second pass.
+  useEffect(() => {
+    if (!open || !rootRef.current) return;
+    const rect = rootRef.current.getBoundingClientRect();
+    const estimatedMenuHeight = options.length * 32 + 10;
+    setOpenUpward(
+      rect.bottom + estimatedMenuHeight > window.innerHeight &&
+        rect.top > estimatedMenuHeight,
+    );
+  }, [open, options.length]);
+
+  function openMenu() {
+    setActiveIndex(Math.max(0, selectedIndex));
+    setOpen(true);
+  }
+
+  function commit(index: number) {
+    const option = options[index];
+    if (option) onChange(option.value);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+    if (!open) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
+        e.preventDefault();
+        openMenu();
+      }
+      return;
+    }
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setActiveIndex((i) => Math.min(options.length - 1, i + 1));
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setActiveIndex((i) => Math.max(0, i - 1));
+        break;
+      case "Home":
+        e.preventDefault();
+        setActiveIndex(0);
+        break;
+      case "End":
+        e.preventDefault();
+        setActiveIndex(options.length - 1);
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        commit(activeIndex);
+        break;
+      case "Escape":
+        e.preventDefault();
+        setOpen(false);
+        break;
+      case "Tab":
+        // Let focus move on as normal; just don't leave the menu hanging open.
+        setOpen(false);
+        break;
+    }
+  }
+
   return (
-    <div className={cn("relative inline-flex", className)}>
-      <select
-        {...props}
+    <div ref={rootRef} className={cn("relative inline-flex", className)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-activedescendant={open ? optionId(activeIndex) : undefined}
+        aria-label={ariaLabel}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={onKeyDown}
         className={cn(
-          "peer w-full appearance-none rounded-lg border border-line-strong bg-surface font-medium text-ink-700 shadow-card outline-none transition-colors",
+          "flex w-full items-center justify-between gap-1.5 rounded-lg border border-line-strong bg-surface font-medium text-ink-700 shadow-card outline-none transition-colors",
           "hover:border-ink-400/70 hover:bg-sunk/40",
           "focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/25",
           "active:bg-sunk/70",
           "disabled:cursor-not-allowed disabled:opacity-50",
-          size === "sm" ? "py-1 pl-2.5 pr-6 text-xs" : "py-2 pl-3 pr-8 text-sm",
-        )}
-      />
-      <svg
-        viewBox="0 0 12 12"
-        fill="none"
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-ink-400 transition-colors peer-hover:text-ink-600 peer-focus-visible:text-accent",
-          size === "sm" ? "right-2 h-3 w-3" : "right-2.5 h-3.5 w-3.5",
+          size === "sm" ? "py-1 pl-2.5 pr-2 text-xs" : "py-2 pl-3 pr-2.5 text-sm",
         )}
       >
-        <path
-          d="M3 4.5L6 7.25L9 4.5"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+        <span className="truncate">{selected?.label}</span>
+        <svg
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden="true"
+          className={cn(
+            "shrink-0 text-ink-400 transition-transform",
+            open && "rotate-180 text-accent",
+            size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5",
+          )}
+        >
+          <path
+            d="M3 4.5L6 7.25L9 4.5"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <ul
+          id={listboxId}
+          role="listbox"
+          aria-label={ariaLabel}
+          className={cn(
+            "absolute inset-x-0 z-20 max-h-56 overflow-auto rounded-lg border border-line bg-surface py-1 shadow-pop",
+            openUpward ? "bottom-full mb-1.5" : "top-full mt-1.5",
+          )}
+        >
+          {options.map((option, i) => (
+            <li
+              key={option.value}
+              id={optionId(i)}
+              role="option"
+              aria-selected={option.value === value}
+              onMouseEnter={() => setActiveIndex(i)}
+              onClick={() => commit(i)}
+              className={cn(
+                "cursor-pointer px-3 py-1.5 text-sm text-ink-700 transition-colors",
+                i === activeIndex && "bg-sunk",
+                option.value === value && "font-semibold text-ink-900",
+              )}
+            >
+              {option.label}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

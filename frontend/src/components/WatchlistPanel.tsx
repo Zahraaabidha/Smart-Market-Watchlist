@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { Item, Preferences, Watchlist } from "@/types";
-import { Button, Card, CardBody, SectionLabel, Select } from "@/components/ui";
+import {
+  Button,
+  Card,
+  CardBody,
+  type ListboxOption,
+  Listbox,
+  SectionLabel,
+} from "@/components/ui";
 import { companyName } from "@/universe";
 
 /**
@@ -8,6 +15,20 @@ import { companyName } from "@/universe";
  * unchanged — the `view` prop just picks which half to show so the sidebar can
  * route "Watchlist" (symbols) and "Manage" (sensitivities) separately.
  */
+
+// Priority is 1 (high) .. 3 (low) throughout the app — unchanged by this
+// component, just labeled slightly differently in the add form vs. the
+// compact per-row control.
+const ADD_PRIORITY_OPTIONS: ListboxOption<number>[] = [
+  { value: 1, label: "High priority" },
+  { value: 2, label: "Normal" },
+  { value: 3, label: "Low priority" },
+];
+const ROW_PRIORITY_OPTIONS: ListboxOption<number>[] = [
+  { value: 1, label: "High" },
+  { value: 2, label: "Normal" },
+  { value: 3, label: "Low" },
+];
 
 export function WatchlistPanel({
   view,
@@ -81,14 +102,12 @@ export function WatchlistPanel({
                 "text-ink-900 placeholder:text-ink-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
               }
             />
-            <Select
+            <Listbox
               value={priority}
-              onChange={(e) => setPriority(Number(e.target.value))}
-            >
-              <option value={1}>High priority</option>
-              <option value={2}>Normal</option>
-              <option value={3}>Low priority</option>
-            </Select>
+              onChange={setPriority}
+              options={ADD_PRIORITY_OPTIONS}
+              aria-label="Priority for new symbol"
+            />
             <Button type="submit" variant="primary" disabled={busy || !symbol.trim()}>
               Add
             </Button>
@@ -151,21 +170,16 @@ export function WatchlistPanel({
                     </span>
                   )}
 
-                  <Select
+                  <Listbox
                     size="sm"
                     value={item.priority}
-                    onChange={(e) =>
-                      void onUpdateItem(item.id, {
-                        priority: Number(e.target.value),
-                      })
+                    onChange={(v) =>
+                      void onUpdateItem(item.id, { priority: v })
                     }
+                    options={ROW_PRIORITY_OPTIONS}
                     className="shrink-0"
                     aria-label={`Priority for ${item.symbol}`}
-                  >
-                    <option value={1}>High</option>
-                    <option value={2}>Normal</option>
-                    <option value={3}>Low</option>
-                  </Select>
+                  />
 
                   <button
                     onClick={() => void onRemove(item.id)}

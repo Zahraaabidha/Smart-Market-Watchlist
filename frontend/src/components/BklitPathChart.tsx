@@ -1,3 +1,4 @@
+import { curveNatural } from "@visx/curve";
 import { useMemo } from "react";
 import {
   ChartTooltip,
@@ -8,6 +9,7 @@ import {
   YAxis,
   useChartStable,
 } from "@/components/charts";
+import { seriesPathFromPoints } from "@/components/charts/series-path-utils";
 import type { SymbolPathDetail } from "@/types";
 import { cn } from "@/lib/utils";
 import { clockTime, price, signedPct } from "@/format";
@@ -20,14 +22,27 @@ import { clockTime, price, signedPct } from "@/format";
  * with no permanent text on the plot — checkpoint, intra-window high, intra-
  * window low and current. Everything (value, time, which marker) shows in a
  * light tooltip on hover. Real backend points, real high/low, tight y-domain.
+ *
+ * Points the backend flags `gap_before` (a genuine break in data collection —
+ * see `app/services/brief.py::_gap_threshold`) are never bridged with a solid
+ * stroke: that would draw continuous market data across a stretch where none
+ * was collected. Where a gap exists the line is split into real segments,
+ * joined only by a thin dashed connector, and the footer says so.
  */
 const UP = "#0f8a52";
 const DOWN = "#c8354a";
+const GAP_STROKE = "#b7bcc6";
+
+type Row = { date: Date; price: number; gapBefore: boolean };
 
 export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
   const model = useMemo(() => {
-    const rows = detail.points
-      .map((p) => ({ date: new Date(p.t), price: Number(p.price) }))
+    const rows: Row[] = detail.points
+      .map((p) => ({
+        date: new Date(p.t),
+        price: Number(p.price),
+        gapBefore: p.gap_before,
+      }))
       .filter((r) => Number.isFinite(r.price) && !Number.isNaN(+r.date))
       .sort((a, b) => +a.date - +b.date);
 
@@ -47,8 +62,28 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
         rows[0],
       );
 
+    // Real, contiguous runs of data — split wherever the backend says a
+    // stretch was genuinely never collected. `gaps` records exactly what
+    // each break spans, for the honest dashed connector and the caption.
+    const segments: Row[][] = [];
+    const gaps: { from: Row; to: Row }[] = [];
+    for (const row of rows) {
+      if (row.gapBefore || segments.length === 0) {
+        if (segments.length > 0) {
+          const prevSegment = segments[segments.length - 1];
+          gaps.push({ from: prevSegment[prevSegment.length - 1], to: row });
+        }
+        segments.push([row]);
+      } else {
+        segments[segments.length - 1].push(row);
+      }
+    }
+
     return {
       rows,
+      segments,
+      gaps,
+      hasGap: gaps.length > 0,
       checkpoint,
       current,
       hi,
@@ -100,12 +135,29 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
 
           <Line
             dataKey="price"
-            stroke={stroke}
+            // The shared `Line` renderer has no notion of a gap — it always
+            // draws one continuous stroke through `data`. Rather than teach
+            // the shared chart primitive a one-off "don't connect these two
+            // points" rule, this instance's own stroke is made invisible
+            // when a real gap exists and `SegmentedStroke` below draws the
+            // honest, broken version from the same points/scales. `Line`
+            // itself stays mounted either way: it is what registers this
+            // series' y-domain and drives the hover tooltip's value lookup.
+            stroke={model.hasGap ? "transparent" : stroke}
             strokeWidth={2.4}
-            animate
+            animate={!model.hasGap}
             fadeEdges={false}
             showHighlight={false}
           />
+
+          {model.hasGap && (
+            <SegmentedStroke
+              segments={model.segments}
+              gaps={model.gaps}
+              stroke={stroke}
+              strokeWidth={2.4}
+            />
+          )}
 
           <YAxis numTicks={4} />
           <TimeAxis />
@@ -186,11 +238,14 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-[10px] font-medium uppercase tracking-wide text-ink-400">
         <LegendDot label="You left" ring="#8b91a3" />
-        <LegendDot label="High" ring={UP} />
-        <LegendDot label="Low" ring={DOWN} />
+        <LegendDot label="High" fill={UP} />
+        <LegendDot label="Low" fill={DOWN} />
         <LegendDot label="Now" fill={stroke} />
+        {model.hasGap && <LegendDot label="Gap" dashed />}
         <span className="ml-auto normal-case tracking-normal">
-          Shaded band = while you were away · hover for detail
+          {model.hasGap
+            ? `Shaded band = while you were away · dashed = no data collected (${gapSummary(model.gaps)})`
+            : "Shaded band = while you were away · hover for detail"}
         </span>
       </div>
     </div>
@@ -201,22 +256,123 @@ function LegendDot({
   label,
   ring,
   fill,
+  dashed,
 }: {
   label: string;
   ring?: string;
   fill?: string;
+  /** A short dashed swatch instead of a dot — the "gap in data" key. */
+  dashed?: boolean;
 }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span
-        className="h-1.5 w-1.5 rounded-full border"
-        style={{
-          borderColor: ring ?? fill,
-          background: fill ?? "#fff",
-        }}
-      />
+      {dashed ? (
+        <svg width="12" height="6" viewBox="0 0 12 6" aria-hidden="true">
+          <line
+            x1={0}
+            y1={3}
+            x2={12}
+            y2={3}
+            stroke={GAP_STROKE}
+            strokeWidth={1.5}
+            strokeDasharray="2.5,2"
+          />
+        </svg>
+      ) : (
+        <span
+          className="h-1.5 w-1.5 rounded-full border"
+          style={{
+            borderColor: ring ?? fill,
+            background: fill ?? "#fff",
+          }}
+        />
+      )}
       {label}
     </span>
+  );
+}
+
+/** "2 gaps, largest 1h 12m" / "1 gap, 29m" — for the honest footer caption. */
+function gapSummary(gaps: { from: Row; to: Row }[]): string {
+  const spans = gaps.map((g) => +g.to.date - +g.from.date);
+  const longest = Math.max(...spans);
+  const label = (ms: number) => {
+    const totalMin = Math.round(ms / 60_000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+  return gaps.length === 1
+    ? label(longest)
+    : `${gaps.length} gaps, longest ${label(longest)}`;
+}
+
+/**
+ * The gap-aware replacement for `<Line>`'s own stroke (which is made
+ * transparent by the caller whenever this renders). One solid `<path>` per
+ * real contiguous run of data — never a single path spanning a gap — plus a
+ * thin dashed connector across each gap so its presence and rough size are
+ * visible rather than just an unexplained blank stretch. Uses the same
+ * `xScale`/`yScale` the rest of the chart's overlays (`PathMarkers`,
+ * `TimeAxis`) already read from context, so it lines up with them exactly.
+ */
+function SegmentedStroke({
+  segments,
+  gaps,
+  stroke,
+  strokeWidth,
+}: {
+  segments: Row[][];
+  gaps: { from: Row; to: Row }[];
+  stroke: string;
+  strokeWidth: number;
+}) {
+  const { xScale, yScale } = useChartStable();
+
+  const toPoint = (row: Row) => ({
+    x: xScale(row.date) ?? 0,
+    y: yScale(row.price) ?? 0,
+  });
+
+  return (
+    <g className="chart-segmented-stroke" pointerEvents="none">
+      {segments.map((segment, i) => (
+        <path
+          // biome-ignore lint/suspicious/noArrayIndexKey: segments are stable per render of this memoized model
+          key={i}
+          d={seriesPathFromPoints(
+            segment.map((row, j) => ({
+              x: xScale(row.date) ?? 0,
+              y: yScale(row.price) ?? 0,
+              key: String(j),
+            })),
+            curveNatural,
+          )}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+        />
+      ))}
+      {gaps.map((gap, i) => {
+        const a = toPoint(gap.from);
+        const b = toPoint(gap.to);
+        if (![a.x, a.y, b.x, b.y].every(Number.isFinite)) return null;
+        return (
+          <line
+            // biome-ignore lint/suspicious/noArrayIndexKey: gaps are stable per render of this memoized model
+            key={i}
+            x1={a.x}
+            y1={a.y}
+            x2={b.x}
+            y2={b.y}
+            stroke={GAP_STROKE}
+            strokeWidth={1.5}
+            strokeDasharray="4,3"
+          />
+        );
+      })}
+    </g>
   );
 }
 
@@ -262,37 +418,45 @@ function PathMarkers({
   const ok = (pt: { x: number; y: number }) =>
     Number.isFinite(pt.x) && Number.isFinite(pt.y);
 
-  // A marker is a small ring (or filled dot) sitting on a white halo a couple
-  // of px wider, so it stays legible wherever the line or grid falls behind
-  // it. The halo carries a hairline border of its own rather than sitting
-  // starkly on the canvas.
+  // Three deliberately distinct marker styles, in increasing weight:
+  //   - checkpoint ("you left"): small and hollow — a reference point, not
+  //     an event.
+  //   - high/low: medium, filled with the up/down color, ringed in white so
+  //     it stays legible wherever the line or grid falls behind it.
+  //   - now: the same white-outline treatment, just slightly larger — it's
+  //     the endpoint the whole chart is building up to.
+  // No text is drawn here; which marker is which, and its exact value/time,
+  // lives entirely in the tooltip on hover.
   const marker = (
     pt: { x: number; y: number },
-    { r, haloR, stroke, strokeWidth = 2.1, fill = "#fff" }: {
+    { r, fill, stroke, strokeWidth }: {
       r: number;
-      haloR: number;
-      stroke?: string;
-      strokeWidth?: number;
-      fill?: string;
+      fill: string;
+      stroke: string;
+      strokeWidth: number;
     },
   ) =>
     ok(pt) && (
-      <>
-        <circle cx={pt.x} cy={pt.y} r={haloR} fill="#fff" stroke="#eef0f3" strokeWidth={1} />
-        <circle cx={pt.x} cy={pt.y} r={r} fill={fill} stroke={stroke} strokeWidth={stroke ? strokeWidth : 0} />
-      </>
+      <circle
+        cx={pt.x}
+        cy={pt.y}
+        r={r}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+      />
     );
 
   return (
     <g className="chart-path-markers" pointerEvents="none">
-      {/* checkpoint — stays smaller/hollow */}
-      {marker(cN, { r: 3.4, haloR: 5.4, stroke: "#8b91a3", strokeWidth: 1.6 })}
-      {/* intra-window high — ~1.5x the old radius, white halo underneath */}
-      {marker(hN, { r: 5.4, haloR: 7.4, stroke: UP })}
-      {/* intra-window low — ~1.5x the old radius, white halo underneath */}
-      {marker(lN, { r: 5.4, haloR: 7.4, stroke: DOWN })}
-      {/* now — slightly larger, filled, with the same halo treatment */}
-      {marker(nw, { r: 4.8, haloR: 7.6, fill: color })}
+      {/* you left — small hollow dot */}
+      {marker(cN, { r: 3, fill: "#fff", stroke: "#8b91a3", strokeWidth: 1.5 })}
+      {/* intra-window high — medium, filled, white outline */}
+      {marker(hN, { r: 5, fill: UP, stroke: "#fff", strokeWidth: 2 })}
+      {/* intra-window low — medium, filled, white outline */}
+      {marker(lN, { r: 5, fill: DOWN, stroke: "#fff", strokeWidth: 2 })}
+      {/* now — slightly larger than high/low, filled, white outline */}
+      {marker(nw, { r: 6, fill: color, stroke: "#fff", strokeWidth: 2.25 })}
     </g>
   );
 }

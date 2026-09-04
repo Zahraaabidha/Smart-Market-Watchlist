@@ -10,6 +10,13 @@ export interface Reason {
 export interface PathPoint {
   t: string;
   price: string;
+  /**
+   * True when this point follows a genuine break in data collection (the
+   * ingestion loop was down, the provider was unreachable, ...) rather than
+   * the previous point in the series — never true on a series' first point.
+   * The chart must not draw a connecting line across it.
+   */
+  gap_before: boolean;
 }
 
 /** The route a price took across the user's absence window. */

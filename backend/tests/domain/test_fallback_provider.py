@@ -69,3 +69,21 @@ def test_recovers_when_primary_comes_back() -> None:
 
     assert fp.degraded is False
     assert fp.name == "primary"
+
+
+def test_survives_many_consecutive_primary_failures() -> None:
+    """Degradation is re-evaluated on every call, not sticky in a way that
+    could wedge the provider after a long outage -- every single poll during
+    a sustained vendor failure must still come back with real (fallback)
+    data, since that is what the ingestion loop calls once per tick for as
+    long as the outage lasts.
+    """
+    primary = _Primary()
+    fp = FallbackProvider(primary, ReplayProvider())
+    primary.up = False
+
+    for _ in range(25):
+        quotes = fp.fetch_current(["RELIANCE"], NOW)
+        assert quotes, "fallback must keep serving data on every single call"
+        assert fp.degraded is True
+        assert fp.name == "replay"
