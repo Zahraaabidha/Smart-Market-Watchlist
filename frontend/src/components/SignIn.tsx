@@ -5,10 +5,12 @@ export function SignIn({
   onSubmit,
   error,
   busy,
+  onModeChange,
 }: {
   onSubmit: (email: string, password: string, mode: "login" | "register") => void;
   error: string | null;
   busy: boolean;
+  onModeChange?: () => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -27,7 +29,7 @@ export function SignIn({
       <div className="hidden flex-col justify-between border-r border-line bg-surface p-12 lg:flex">
         <div className="flex items-center gap-2 text-sm font-semibold text-ink-900">
           <Mark />
-          Smart Market Watchlist
+          Groww Focus
         </div>
         <div>
           <h1 className="max-w-md text-3xl font-semibold leading-tight tracking-tight text-ink-900">
@@ -48,7 +50,7 @@ export function SignIn({
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2 text-sm font-semibold text-ink-900 lg:hidden">
             <Mark />
-            Smart Market Watchlist
+            Groww Focus
           </div>
 
           <h2 className="text-lg font-semibold tracking-tight text-ink-900">
@@ -116,7 +118,10 @@ export function SignIn({
           </form>
 
           <button
-            onClick={() => setMode(mode === "login" ? "register" : "login")}
+            onClick={() => {
+              setMode(mode === "login" ? "register" : "login");
+              onModeChange?.();
+            }}
             className="mt-4 text-xs font-medium text-ink-500 transition-colors hover:text-ink-700"
           >
             {mode === "login"

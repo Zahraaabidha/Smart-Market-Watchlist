@@ -1,370 +1,95 @@
-# Smart Market Watchlist
+# Groww Focus
 
-**A watchlist should not make you scan the market. It should tell you what changed enough to matter.**
+An independent hackathon project. Not affiliated with or endorsed by Groww, it just borrows the name because the idea is about focus: showing you what actually changed in your watchlist instead of a wall of numbers.
 
-Conventional watchlists show you a grid of numbers and leave the analysis to
-you. Every price is equally prominent, so nothing is. Come back after four
-hours and you are doing the same visual diff you did this morning — against a
-list you cannot remember the previous state of.
+## The problem
 
-This product inverts that. The primary screen is not a list of prices; it is a
-**Market Brief** that answers one question:
+Most watchlist screens are just a grid of live prices. Every row looks equally important, so you end up scanning the whole list every time you open the app, comparing it against what you remember from this morning. Two things make this worse:
 
-> What changed since I last checked, and what deserves my attention?
+- A fixed alert threshold ("tell me if it moves 3%") is wrong for most stocks. It's noise for a volatile name and silence for a calm one.
+- Comparing "last price" to "current price" misses what happened in between. A stock that spiked 7% and settled back to +0.4% looks like nothing happened, when that swing was probably the most important thing that occurred that day.
 
----
+## What it does
 
-## The problem it solves
+Groww Focus replaces the price grid with a **Brief**: a ranked list of what actually changed since you last looked, with a plain-language reason for each one. You mark a brief as reviewed when you're done with it, and the next time you open the app it only shows you what's new since that checkpoint.
 
-Three failures of the conventional design:
+The ranking comes from a small scoring engine (`backend/app/domain/engine.py`) that combines a few signals per symbol:
 
-1. **Everything looks equally important.** A 0.2% drift and a 7% collapse get
-   the same row, the same font, the same colour treatment.
-2. **A fixed alert threshold is wrong for every stock.** "Tell me above 3%" is
-   noise for a volatile mid-cap and silence for a stable large-cap.
-3. **Comparing last price to current price misses what happened in between.**
-   A stock that ran +7% and settled back at +0.4% reads as "nothing happened",
-   and that is often the single most important event of the day.
+| Signal | What it checks |
+|---|---|
+| `move_vs_threshold` | Did it move more than the threshold you set for it? |
+| `unusual_vs_baseline` | Is this move unusual compared to that symbol's own recent volatility? |
+| `volume_anomaly` | Was there unusual trading volume behind the move? |
+| `threshold_above` / `threshold_below` | Did it cross a price level you set? |
+| `intrawindow_swing` | Did it spike and reverse while you weren't looking? |
 
----
-
-## The Meaningful Change Engine
-
-The core of the product is a deterministic scoring engine. It is a **pure
-function** — no clock reads, no randomness, no database access — which is what
-makes it exhaustively testable and fully explainable.
-
-### Signals
-
-| Signal | Weight | Question it answers |
-|---|---|---|
-| `move_vs_threshold` | 26 → 48 | Did it move more than *this user* cares about? |
-| `unusual_vs_baseline` | up to 28 | Is this move unusual *for this stock*? |
-| `volume_anomaly` | up to 18 | Is there conviction behind the move? |
-| `threshold_above` / `threshold_below` | 34 | Did it cross a line the user drew? |
-| `intrawindow_swing` | up to 34 | Did something big happen *and reverse* while they were away? |
-
-Two calibration rules hold the model together, both found by tests and the demo
-rather than by design:
-
-- **Every standalone signal must outweigh the NOTABLE floor.** A swing or a
-  threshold cross fires precisely when the endpoint move is small, so no other
-  signal is available to add to it. Weighted below 25, such a signal can never
-  surface the one case it exists to catch. A regression test asserts this.
-- **Meeting the user's own threshold is enough to surface.** `move_vs_threshold`
-  starts at 26 — just above the NOTABLE band — rather than scaling from zero. A
-  preference that silently means something stricter than it says is worse than
-  no preference at all.
-
-Each firing signal contributes points **and its own sentence**. The score is
-literally the sum of the explanations shown to the user — a property enforced
-by a test, so the interface can never display a number it cannot justify.
-
-The final score is scaled by user priority (0.8× / 1.0× / 1.25×) and by data
-freshness, then banded:
+Each signal that fires contributes points and a sentence explaining why, and the total is scaled by the priority you gave that symbol and by how fresh the underlying data is. The score then lands in one of four bands:
 
 | Score | Severity |
 |---|---|
 | ≥ 70 | Critical |
 | ≥ 45 | High |
 | ≥ 25 | Notable |
-| < 25 | Quiet — shown in the "no meaningful change" list |
+| < 25 | Quiet (shown separately as "nothing happened") |
 
-### Volatility is scaled by the square root of time
+The engine itself is a pure function with no database or clock access, which is what makes it fast to test (`backend/tests/domain/test_engine.py`).
 
-The baseline is a *per-observation* standard deviation, but the move being
-judged spans the whole window. Comparing them directly is a horizon mismatch: a
-three-hour move measured against 15-second volatility reads as 10–25 sigma, and
-the signal fires for everything.
+## Key user flow
 
-The engine therefore compares against `stdev × √periods`. Without this, the
-signal that exists to prevent crying wolf was the loudest source of it — the
-demo reported "13.7x this stock's normal move size" for a 0.81% drift.
+1. Sign up, which seeds a starter watchlist so the Brief isn't empty on your first visit.
+2. Add symbols on the **Watchlist** tab, set a priority per symbol if you want.
+3. Tune sensitivity on the **Manage** tab: minimum move %, volume sensitivity, swing sensitivity. These are per-user preferences, not global settings, so a threshold that's right for you doesn't have to be right for anyone else.
+4. Open the **Brief**. It shows what changed since your last checkpoint, ranked by score, with a reason for each row. Click a row to open the full price path for that symbol, with the checkpoint, the intra-window high/low, and "now" marked on the chart.
+5. Click "I've reviewed this" when you're done. That's a manual action on purpose, nothing gets marked reviewed just from opening the tab, because closing the tab without reading it shouldn't silently erase what you were supposed to see.
+6. Check **History** later to see what past briefs surfaced, grouped by day.
 
-### Why per-symbol baselines
+## Live and replay data
 
-"Unusual" is measured in standard deviations of that symbol's own recent
-returns, not as a fixed percentage. A 4% move fires the unusual-move signal for
-a calm stock and stays silent for a volatile one. This is the main defence
-against crying wolf.
+There are two ways the app gets market data, and the UI always tells you honestly which one you're looking at:
 
-**When the baseline is thin (fewer than 5 observations, or zero variance), the
-signal is withheld entirely.** A product whose value proposition is "we only
-tell you what matters" cannot afford confident claims derived from three data
-points. The plain move signal still fires — the observation is kept, only the
-comparison is withheld.
+- **Replay** (the default) is a deterministic simulator. It generates prices as a hash of `(seed, symbol, tick index)`, so the same seed always produces the same market and nothing needs an API key. This is what runs out of the box and what the "Replay data" badge in the sidebar refers to. It's a status indicator, not a button. It just tells you which data source is currently backing the Brief. It's read-only because there's nothing to click, replay is either on or the live feed has taken over.
+- **Live** wraps [Twelve Data](https://twelvedata.com/) for real NSE/BSE quotes. It only turns on if you set `MARKET_PROVIDER=live` and provide `TWELVE_DATA_API_KEY`. If the live call fails for any reason, the app automatically falls back to replay data and flips a `degraded` flag rather than showing nothing. The UI reflects this too: the badge switches to "Degraded" with a banner explaining the vendor is unavailable.
 
-### The signature signal: intra-window swing
+The one thing the UI is careful never to do is call replay data "Live", even if it's ticking in real time. If it's simulated, it says so.
 
-The engine tracks the highest and lowest price *within* the window, not just
-the endpoints. This is the reason the system stores a snapshot **series**
-rather than a last-known price.
+The **Demo** button (visible when `DEMO_MODE=true`, which is the default in local dev) is a separate thing from all of this: it's an action, not a status. Clicking it seeds your current account's watchlist with the replay universe, backfills some price history, and sets a checkpoint three hours in the past, so you immediately get a populated Brief to look at instead of starting from an empty account. It always uses replay data regardless of which provider mode you're in. It's meant purely as a "show me something interesting right now" button for trying the app out.
 
-> Swung to +7.0% at its high while you were away, then settled at +0.4%.
-> Comparing prices alone would have missed this.
+## Tech stack
 
----
+- **Backend:** FastAPI + SQLAlchemy on Postgres, bearer-token auth with bcrypt password hashing. Layered as `domain` (pure scoring logic, no DB imports), `services` (orchestration and transactions), `persistence` (models), `integrations` (the market data provider abstraction), and `api` (routers).
+- **Frontend:** React + TypeScript + Tailwind, built with Vite. The price-path chart is a hand-rolled SVG chart rather than a charting library dependency, since it only needs to draw one specific chart shape.
+- **Tests:** pytest, split into fast domain tests (no infrastructure needed) and integration tests that need Postgres and skip themselves if it's not reachable.
 
-## "Since you last checked" history
+## A few reliability details worth knowing about
 
-Marking a brief as read closes its window, and whatever that brief surfaced is
-written to `meaningful_changes` against the checkpoint that closed it. The
-**History** tab reads it back, grouped by day.
-
-These are **records, not recomputations.** The brief could in principle be
-rebuilt from snapshots, but the derivation is only stable while its inputs are:
-baselines shift as the window advances and old snapshots age out, so
-recomputing last Tuesday's brief next month can legitimately give a different
-answer. A user asking "what was I told on Tuesday?" needs the answer they were
-actually shown, so the explanation text and score are stored verbatim.
-
-Paging is keyset-based on the primary key rather than `OFFSET`, which stays
-fast as history grows and cannot skip or repeat rows when new entries arrive
-mid-scroll.
-
----
-
-## Seeing the path, not just the endpoints
-
-The brief answers "what changed while I was away" as a screen, not a grid:
-
-- A **hero** states the absence window (`last checked → now`) and the counts —
-  high attention, notable, unchanged.
-- Each **attention card** carries a compact **sparkline** with two markers: the
-  price when you last checked, and the intra-window extreme. A stock that ran
-  +7% and settled at +1% *looks* different from one that drifted to +1%.
-- Drilling into a card opens the **path view**: the full price route across the
-  absence window, with the checkpoint, both intra-window extremes and the
-  current value marked, the absence window shaded, and a plain-language "why
-  this matters" for a round trip an endpoint comparison would have missed.
-
-Two additive, read-only endpoints back this. They serialize data the brief
-service already loads; **no scoring logic changed**.
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /watchlists/{id}/brief` → `attention[].path` | downsampled path per card (~56 points, true high/low always kept) |
-| `GET /watchlists/{id}/path/{symbol}` | full-resolution path + `source` / `source_timestamp` / `received_at` / `freshness` for the detail view |
-
-The sparklines are hand-rolled inline SVG — no charting dependency — because a
-chart in every card is exactly the density this product is trying to avoid. The
-one full chart lives in the path view.
-
----
-
-## Data freshness and source, shown honestly
-
-The replay provider simulates a market; **it is never labelled "Live"**. The UI
-says **"Replay data"** (or **"Replay · stale"**), and the header carries a
-source chip that reads `Replay data`, `Live market data`, or `Degraded`.
-
-`GET /market/source` reports what is actually feeding the product —
-`provider`, `mode`, `degraded`, `degraded_reason`, `last_poll_at`,
-`last_success_at` — read from process state written by the ingestion loop, with
-no database hit.
-
-### Optional live provider
-
-`MarketDataProvider` has two implementations behind it:
-
-```
-MarketDataProvider
-├── ReplayMarketDataProvider   deterministic, no credentials, always the fallback
-└── TwelveDataProvider          live vendor (NSE/BSE), wrapped by FallbackProvider
-```
-
-`FallbackProvider` tries the live vendor and, on any `MarketDataError`,
-transparently serves replay data and flips `degraded = true`. `.name` proxies to
-whichever provider actually served, so every persisted snapshot's `source`
-column stays truthful across a mid-stream failover.
-
-Enabled with `MARKET_PROVIDER=live` **and** `TWELVE_DATA_API_KEY` set — no key,
-no live mode, and the app logs a warning and stays on replay rather than
-failing to start. There is no hardcoded key.
-
----
-
-## Data freshness as a first-class concept
-
-Freshness is always derived from the **source timestamp** — when the market
-produced the tick — never from when the row was written. A row inserted one
-second ago carrying a twenty-minute-old quote is stale data.
-
-| State | Age | Score weight |
-|---|---|---|
-| `fresh` | ≤ 60s | 1.00 |
-| `delayed` | ≤ 15m | 0.85 |
-| `stale` | > 15m | 0.50 |
-
-- A brief reports its **worst** freshness, not its best.
-- Stale data is never silently presented as current — the UI shows an explicit
-  banner and the engine adds a `freshness_penalty` reason.
-- A **future** source timestamp (clock skew, broken feed) is treated as stale,
-  not as maximally fresh, so a bad feed cannot manufacture confident alerts.
-
----
-
-## Architecture
-
-A modular monolith: one FastAPI process, one Postgres, one React SPA.
-
-```
-backend/app/
-  domain/         pure logic — engine, baselines, freshness.  NO db imports
-  services/       orchestration, transactions, ownership checks
-  persistence/    SQLAlchemy models
-  integrations/   MarketDataProvider abstraction + replay provider
-  api/            thin routers: parse, authorize, delegate, serialize
-  core/           config, security, error types
-frontend/src/     React + TypeScript + Tailwind
-```
-
-The rule that `domain/` imports nothing from `persistence/` is the most
-important structural decision in the repository. It is why 54 domain tests run
-in about a second with no infrastructure, and why a scoring bug can never be
-confused with a persistence bug.
-
-### Data flow
-
-```
-ReplayProvider ──> ingestion loop (every 15s, all watched symbols)
-                        │
-                        ├──> market_snapshots   (append-only, deduped)
-                        └──> latest_quotes      (promoted only if newer)
-                                    │
-      user request ──> brief service ──> domain engine ──> ranked changes
-                                                                │
-                                                        Market Brief UI
-```
-
----
-
-## Reliability
-
-### Duplicate events
-
-`market_snapshots` is uniquely keyed on `(source, symbol, source_timestamp)`
-with `ON CONFLICT DO NOTHING`. Replaying a feed any number of times inserts
-exactly one row, which makes the ingestion loop safe to retry after a partial
-failure.
-
-The replay provider snaps timestamps to a 15-second grid, so polling faster
-than the feed ticks produces identical events that collapse naturally rather
-than three near-identical rows.
-
-### Out-of-order events
-
-Handled by splitting history from current state:
-
-- **`market_snapshots`** records the late tick and flags it `out_of_order`, so
-  feed quality stays measurable.
-- **`latest_quotes`** is updated through a conditional upsert
-  (`WHERE latest.source_timestamp < new.source_timestamp`), so a late tick can
-  never regress what we present as current.
-
-The `WHERE` clause is the real guarantee — it holds even when two ingestion
-passes run concurrently and both believe they hold the newest tick. Ties do not
-promote: equal timestamps are not newer.
-
-Out-of-order rows are excluded from the analysis window, because they were
-never part of what the user could have seen — including them would let a late
-tick invent a swing that never happened.
-
-### Conflicting values
-
-Two vendors reporting different prices for the same instant both persist, since
-`source` is part of the identity key. Disagreement is evidence, not noise to be
-silently resolved.
-
-### Concurrent writers
-
-Ingestion sorts by symbol before writing, in both `ingest_quotes` and
-`backfill`. Concurrent transactions that take the same `latest_quotes` row
-locks in different orders deadlock — a backfill walking symbol-by-symbol and a
-live poll walking tick-by-tick did exactly that during development. A
-deterministic order makes the deadlock impossible rather than merely rare.
-
-Backfill is also a distinct ingestion mode: historical rows are older than
-current state by definition, which is not the same event as a late tick
-arriving mid-stream. Conflating them flagged an entire backfill as
-out-of-order and silently excluded it from every analysis window.
-
-### Idempotency
-
-- **Adding a symbol** is idempotent — a duplicate add returns the existing row.
-  A double-tap is far more likely than a genuine intent to error.
-- **Checkpoints** are idempotent on a client-supplied key. This matters more
-  than it appears: a double-submitted checkpoint creates a second window
-  seconds after the first, so the next brief compares against a moment when
-  nothing had yet happened. The user returns to an empty brief and concludes
-  the market was quiet. Nothing a constraint would catch — just silently wrong.
-
-### Graceful degradation
-
-- **Total provider outage** → last known good data is preserved and served with
-  an explicit staleness banner. The ingestion loop survives and retries.
-- **Partial failure** → healthy symbols ingest normally; unavailable ones are
-  listed explicitly rather than rendered as unchanged.
-- **Network failure in the browser** → the last good brief stays on screen; a
-  failed background refresh does not blank the page.
-- **Long absence** → the comparison window is bounded to 7 days, and the UI
-  says so rather than implying a month-long comparison.
-
----
-
-## Security
-
-- Bearer-token auth (JWT), bcrypt password hashing.
-- **Ownership checks are fused into the lookup.** `get_owned_watchlist(session,
-  user, id)` filters on `user_id` in the same query that loads the row. There
-  is no function that returns a watchlist without verifying ownership, so a
-  future route cannot forget to check.
-- **Cross-user access returns 404, not 403** — a 403 would confirm the row
-  exists and let an attacker map other users' data by enumerating ids.
-- Login failures return one message for both "no such user" and "wrong
-  password", so the endpoint cannot enumerate accounts.
-- Unhandled exceptions return a generic message; the trace goes to the log.
-- The app refuses to start in `production` with the demo `SECRET_KEY`.
-
----
+- Market snapshots are deduped on `(source, symbol, source_timestamp)`, so replaying the same feed twice never creates duplicate rows.
+- A late-arriving tick is recorded but flagged `out_of_order` and excluded from scoring, and can never overwrite a newer "current" price, thanks to a conditional upsert (`WHERE latest.source_timestamp < new.source_timestamp`).
+- Checkpoints are idempotent on a client-supplied key, so a double-tap on "I've reviewed this" can't accidentally create two checkpoints seconds apart and blank out the next brief.
+- Adding a symbol you already have just returns the existing one instead of erroring, since a duplicate add is much more likely to be a double click than intent.
+- Cross-user access to another account's watchlist returns 404, not 403, so you can't use the response to confirm whether a given watchlist ID exists.
 
 ## Setup
 
-**Requirements:** Docker (for PostgreSQL), Python 3.11+, Node 20+.
+Needs Docker (for Postgres), Python 3.11+, and Node 20+.
 
 ```bash
 docker compose up -d db
 ```
 
-### Run the demo
-
-```bash
-cd backend
-python -m app.demo           # fixed replay window, byte-identical every run
-python -m app.demo --live    # same market, anchored to now, seeds a UI account
-```
-
-`--live` seeds `demo@example.com` / `demo-password-123`. Sign in with it to see
-a populated brief immediately.
-
-**In the app:** when `DEMO_MODE=true`, the header shows a **Run demo** button.
-It seeds the signed-in account's watchlist with the replay universe, backfills
-history, and records a checkpoint three hours in the past — reproducing
-*check → away → return → explained* without leaving the browser.
-`POST /api/demo/provider {"mode":"failing"}` forces a provider outage so the
-degraded fallback path is visible on demand. Both routes are only mounted in
-demo mode.
-
-### Manual setup
+Backend:
 
 ```bash
 cd backend
 python -m venv .venv
-.venv/Scripts/activate      # Windows;  source .venv/bin/activate on macOS/Linux
+.venv/Scripts/activate      # Windows; source .venv/bin/activate on macOS/Linux
 pip install -r requirements-dev.txt
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
+
+There's no separate migration step, tables are created automatically on startup.
+
+Frontend:
 
 ```bash
 cd frontend
@@ -372,26 +97,34 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and create an account — it is seeded with a starter
-watchlist so the brief is never an empty page.
+Open `http://localhost:5173` and create an account. It comes with a starter watchlist so the Brief isn't empty.
+
+To see a populated Brief immediately without registering by hand, run the demo seed script instead:
+
+```bash
+cd backend
+python -m app.demo           # fixed replay window, same output every run
+python -m app.demo --live    # same market, anchored to now, seeds demo@example.com / demo-password-123
+```
 
 ### Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | local Postgres | Connection string |
-| `ENVIRONMENT` | `development` | `production` enforces a real `SECRET_KEY` |
+| `ENVIRONMENT` | `development` | `production` requires a real `SECRET_KEY` |
 | `SECRET_KEY` | demo value | JWT signing key |
-| `INGEST_INTERVAL_SECONDS` | `15` | Shared polling cadence |
-| `BASELINE_WINDOW_SIZE` | `40` | Observations retained per baseline |
-| `MARKET_PROVIDER` | `replay` | `live` wraps Twelve Data with a replay fallback |
-| `TWELVE_DATA_API_KEY` | — | Required for `MARKET_PROVIDER=live`; no key ⇒ stays on replay |
-| `TWELVE_DATA_EXCHANGE` | `NSE` | Exchange qualifier for the live vendor |
+| `INGEST_INTERVAL_SECONDS` | `15` | How often the ingestion loop polls |
+| `BASELINE_WINDOW_SIZE` | `40` | Observations kept per symbol for the baseline |
+| `MARKET_PROVIDER` | `replay` | `live` enables Twelve Data with a replay fallback |
+| `TWELVE_DATA_API_KEY` | (none) | Required for live mode; without it the app just stays on replay |
+| `TWELVE_DATA_EXCHANGE` | `NSE` | Exchange qualifier for the live provider |
 
-No secret is hardcoded. The app runs fully in demo mode without external
-credentials, and the live provider is opt-in.
+No key is hardcoded anywhere, and the app runs fully in replay mode with zero external credentials.
 
----
+## Deployment
+
+There's a `backend/Dockerfile` and a `docker-compose.yml` that runs Postgres and the API together (`docker compose up -d`, then set `SECRET_KEY` in your environment for anything beyond local testing). The frontend has no server component, it's a static Vite build (`npm run build` in `frontend/`) that can be served from any static host, as long as `/api` is proxied or otherwise pointed at wherever the backend is running.
 
 ## Tests
 
@@ -400,111 +133,20 @@ cd backend
 .venv/Scripts/python -m pytest
 ```
 
-Domain tests need no infrastructure. Integration tests require Postgres and
-**skip loudly** if it is unreachable — they exercise `ON CONFLICT ... WHERE`,
-which is Postgres-specific, and running them against SQLite would test a
-different system than the one that ships.
+Domain tests run with no infrastructure. Integration tests need Postgres and skip themselves (loudly) if it's unreachable, since they exercise a Postgres-specific `ON CONFLICT ... WHERE` clause that wouldn't mean the same thing against SQLite.
 
-Coverage is concentrated on the highest-risk logic: scoring thresholds and
-calibration, baseline reliability, freshness weighting, ranking determinism,
-duplicate and out-of-order ingestion, provider failure, and cross-user
-authorization.
+## What's intentionally not here
 
----
-
-## Demo mode
-
-The replay provider generates quotes as a pure function of
-`(seed, symbol, tick index)` using a hash rather than a stateful PRNG. The same
-seed produces the same market on any machine, and any point in history can be
-computed without replaying everything before it.
-
-The default universe spans a calm large-cap, a volatile mid-cap and a very
-quiet name, so per-symbol baselines have something real to discriminate
-between.
-
----
-
-## Trade-offs and what was deliberately cut
-
-**No news/event signal.** There is no free, reliable, symbol-mapped news
-source. Approximating one with headline scraping would put unverifiable claims
-inside a feature whose entire value depends on being trustworthy.
-
-**No AI layer.** The explanations are already complete sentences assembled from
-verified numbers. An LLM rewriting them would add latency, cost and a
-hallucination surface over text that is currently guaranteed correct — while
-making the reasoning harder to defend, not easier.
-
-**No Redis, Celery, or separate worker.** Ingestion is one provider call and
-one bulk insert per interval. A broker and worker process would be new failure
-modes in service of a task that takes milliseconds.
-
-**Viewing the brief does not create a checkpoint.** A user who opens the tab,
-gets interrupted and closes it has not read anything. Auto-checkpointing would
-silently erase exactly the changes they came back for.
-
----
+- No news or event feed. There isn't a reliable, free, symbol-mapped news source, and a scraped approximation didn't seem worth the risk to a feature that's supposed to be trustworthy.
+- No AI-generated summaries. The reasons shown in the Brief are assembled directly from the scoring signals, so they're already accurate by construction. Running them through an LLM would add latency and a chance of getting something wrong, for no real benefit.
+- No outlier rejection on incoming prices. A bad print from the feed would currently be scored like a real move. Telling a genuine circuit-breaker event apart from a data glitch needs information (corporate actions, halts) this project doesn't have.
+- One watchlist per user in the UI, though the schema supports more.
+- No password reset or email verification flow.
 
 ## Known limitations
 
-- The default provider simulates a market; it is not live data, and the UI says
-  so. A `TwelveDataProvider` implements the same interface for a real NSE/BSE
-  feed, wrapped by a replay fallback — but free-tier Indian-market coverage and
-  rate limits make it best-effort, which is why replay stays the default.
-- Baselines are computed from the replay history rather than true daily OHLC
-  bars, so "normal volatility" reflects the simulated series.
-- The path view uses a hand-rolled SVG chart, not a charting library. It draws
-  exactly the marks the feature needs (checkpoint, both extremes, absence band)
-  and adds nothing to the bundle; a library would be justified only once the
-  product needs many chart types.
-- One watchlist per user is surfaced in the UI, though the schema and API
-  support many.
-- History records only meaningful changes. Keeping a row per quiet symbol per
-  check would grow without bound to record that nothing happened.
-- No email verification or password reset.
-- **No outlier rejection on incoming prices.** A feed glitch reporting a 4x
-  price would be scored as a genuine move and surfaced as critical. This is a
-  deliberate gap rather than an oversight: distinguishing bad data from a real
-  circuit-breaker event, halt, or stock split needs corporate-actions data the
-  system does not have, and a naive percentage filter would suppress exactly
-  the extreme events the product exists to report. The honest fix is to flag
-  suspect prints rather than silently drop them.
-- The ingestion loop is per-process; running multiple API replicas would
-  duplicate polling work (see below).
+- Baselines are computed from replay history rather than real daily OHLC data, so "normal volatility" reflects the simulated series, not the actual market.
+- History only records meaningful changes, not a row for every quiet check, so it stays small over time.
+- The ingestion loop runs inside the single API process. Running multiple API replicas would currently duplicate polling work; splitting ingestion into its own process is the obvious next step if that ever matters.
 
----
-
-## How this scales
-
-**Already done:**
-- Market data is fetched **once per symbol**, not once per user or per request.
-  Provider cost scales with distinct symbols, not traffic.
-- Brief assembly bulk-loads all symbol windows in two queries regardless of
-  watchlist size — no N+1.
-- `ix_snapshots_symbol_time` serves the window query directly.
-- `latest_quotes` avoids a correlated `max()` subquery on every read.
-
-**Next steps, in the order they would become necessary:**
-
-1. **Separate the ingestion loop into its own process.** Trigger: ingestion no
-   longer finishes within one interval, or the API needs to scale independently.
-   The loop already calls only `services.ingestion`, so this is a move of the
-   entrypoint.
-2. **Cache the brief per (watchlist, checkpoint).** Trigger: repeated reads
-   between checkpoints dominating the query load. The result is deterministic
-   for a given window, so it caches cleanly.
-3. **Partition `market_snapshots` by time** and age out old partitions. Trigger:
-   the table outgrowing comfortable index maintenance.
-4. **Materialise baselines** on a schedule instead of computing per brief.
-   Trigger: baseline history queries becoming the dominant cost.
-
-Redis is not in this list until step 2 demonstrates a real need. Nothing here
-is pre-built.
-
----
-
-## Engineering decisions
-
-See [docs/decisions.md](docs/decisions.md) for the reasoning behind each major
-choice, including the alternatives that were rejected and why.
+For the reasoning behind specific design decisions (and the alternatives that were rejected), see [docs/decisions.md](docs/decisions.md).

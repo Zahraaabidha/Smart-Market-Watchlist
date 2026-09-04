@@ -12,11 +12,11 @@ import { companyName } from "@/universe";
 
 /**
  * Watchlist symbols and attention preferences. Semantics and values are
- * unchanged — the `view` prop just picks which half to show so the sidebar can
+ * unchanged - the `view` prop just picks which half to show so the sidebar can
  * route "Watchlist" (symbols) and "Manage" (sensitivities) separately.
  */
 
-// Priority is 1 (high) .. 3 (low) throughout the app — unchanged by this
+// Priority is 1 (high) .. 3 (low) throughout the app - unchanged by this
 // component, just labeled slightly differently in the add form vs. the
 // compact per-row control.
 const ADD_PRIORITY_OPTIONS: ListboxOption<number>[] = [
@@ -203,7 +203,7 @@ export function WatchlistPanel({
           <div className="mb-3">
             <SectionLabel>What you want surfaced</SectionLabel>
             <p className="mt-1 max-w-2xl text-xs leading-relaxed text-ink-400">
-              These tune what <em>you</em> want the brief to raise — not what is
+              These tune what <em>you</em> want the brief to raise - not what is
               objectively important in the market. Raising a threshold means
               fewer, more significant alerts for you.
             </p>
@@ -276,13 +276,13 @@ function SensitivityCard({
   //
   // Root cause this guards against: `value` comes from server state that is
   // refetched both after our own save *and* on an unrelated 20s background
-  // poll. That refetch can — and routinely does — land while our own save is
+  // poll. That refetch can - and routinely does - land while our own save is
   // still in flight, so the effect below would otherwise see a `value` that
   // still reflects the pre-edit number and snap `local` back to it right
   // after the user let go. The slider then appeared to ignore the first
   // interaction, and only "took" on a second attempt once the round trip from
   // the first attempt had finally caught up. Comparing against the value we
-  // ourselves last sent — rather than trusting every incoming prop — means a
+  // ourselves last sent - rather than trusting every incoming prop - means a
   // stale/irrelevant response is ignored instead of overwriting a newer edit.
   //
   // The wait is bounded: `onCommit` reports success/failure through this
@@ -290,7 +290,7 @@ function SensitivityCard({
   // banner rather than a rejected promise, so we can't rely on a rejection to
   // know a save was lost. If nothing has confirmed our value within
   // PENDING_TIMEOUT_MS, we stop protecting it and trust the server's answer
-  // again — a lost write still self-corrects on the next poll instead of
+  // again - a lost write still self-corrects on the next poll instead of
   // leaving the control stuck forever on an unsaved number.
   const pendingRef = useRef<{ value: number; at: number } | null>(null);
   const PENDING_TIMEOUT_MS = 8000; // well under the 20s background refresh
@@ -314,8 +314,8 @@ function SensitivityCard({
 
   function handleChange(next: number) {
     // Mark this as "ours" immediately (not just at release) so a background
-    // refresh landing mid-drag — pointer *or* a held keyboard key, which
-    // never sets `dragging` — can't interrupt what's on screen.
+    // refresh landing mid-drag - pointer *or* a held keyboard key, which
+    // never sets `dragging` - can't interrupt what's on screen.
     pendingRef.current = { value: next, at: Date.now() };
     setLocal(next);
   }

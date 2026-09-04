@@ -16,7 +16,7 @@ type CurveFactory = any;
 export type ProjectionStrokeStyle = "solid" | "gradient";
 
 export interface ProjectionLineProps {
-  /** Projection path points — anchor (last data row) + horizon end. */
+  /** Projection path points - anchor (last data row) + horizon end. */
   data: ProjectionPoint[];
   /** Y-scale group id. Default: `"left"`. */
   yAxisId?: string | number;

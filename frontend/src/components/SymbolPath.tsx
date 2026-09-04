@@ -102,25 +102,25 @@ export function SymbolPath({
 
       {detail && (
         <>
-          {/* headline numbers — checkpoint → movement → extreme → now */}
+          {/* headline numbers - checkpoint → movement → extreme → now */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Metric label="You left at" value={price(detail.checkpoint_price)} />
             <Metric
               label="Peak while away"
-              value={peakMove != null ? signedPct(peakMove) : "—"}
+              value={peakMove != null ? signedPct(peakMove) : "-"}
               tone={peakMove != null && peakMove >= 0 ? "up" : "down"}
             />
             <Metric label="Now" value={price(detail.current_value)} />
             <Metric
               label="Change since review"
-              value={endMove != null ? signedPct(endMove) : "—"}
+              value={endMove != null ? signedPct(endMove) : "-"}
               tone={endMove != null && endMove >= 0 ? "up" : "down"}
             />
           </div>
 
           <BklitPathChart detail={detail} />
 
-          {/* why this matters — the signature explanation */}
+          {/* why this matters - the signature explanation */}
           {swing && peakMove != null && endMove != null && (
             <Card>
               <CardBody className="text-sm text-ink-700">
@@ -134,7 +134,7 @@ export function SymbolPath({
                   {signedPct(endMove)}
                 </strong>
                 . A watchlist that only compares last price to current price
-                would have reported this as almost nothing — the move happened
+                would have reported this as almost nothing - the move happened
                 entirely inside your absence window.
               </CardBody>
             </Card>
@@ -208,7 +208,7 @@ export function SymbolPath({
                   value={
                     detail.received_at
                       ? `${clockTime(detail.received_at)} · ${relativeTime(detail.received_at)}`
-                      : "—"
+                      : "-"
                   }
                 />
                 <Trust

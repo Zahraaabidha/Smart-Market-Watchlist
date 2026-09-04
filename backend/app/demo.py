@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
         symbols = [i.symbol for i in watchlist.items]
 
-        print("Smart Market Watchlist -- deterministic demo")
+        print("Groww Focus - deterministic demo")
         print("=" * 60)
         print(f"Watchlist : {watchlist.name} ({len(symbols)} symbols)")
         print(f"Symbols   : {', '.join(symbols)}")

@@ -195,7 +195,14 @@ export default function App() {
   }
 
   if (!authed) {
-    return <SignIn onSubmit={handleAuth} error={authError} busy={authBusy} />;
+    return (
+      <SignIn
+        onSubmit={handleAuth}
+        error={authError}
+        busy={authBusy}
+        onModeChange={() => setAuthError(null)}
+      />
+    );
   }
 
   function navigate(t: Tab) {
@@ -221,7 +228,7 @@ export default function App() {
       <div className="min-w-0 flex-1">
         <MobileTopBar onOpen={() => setNavOpen(true)} />
 
-        <main className="max-w-6xl px-4 py-8 lg:px-10">
+        <main className="mx-auto max-w-6xl px-4 py-8 lg:px-10">
           {error && (
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-sev-bg-critical bg-sev-bg-critical px-4 py-3 text-sm text-sev-critical">
             <span className="flex-1">{error}</span>

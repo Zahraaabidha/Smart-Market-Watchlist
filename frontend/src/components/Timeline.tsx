@@ -5,7 +5,7 @@ import { companyName } from "@/universe";
 
 /**
  * A market-event timeline: what this watchlist surfaced at previous checks.
- * Records, not recomputations — the wording and score are what the user saw
+ * Records, not recomputations - the wording and score are what the user saw
  * then. Tightened to a dense, scannable list; rows drill into the path view.
  */
 const dot: Record<TimelineEntry["severity"], string> = {
@@ -20,7 +20,7 @@ const dot: Record<TimelineEntry["severity"], string> = {
  * when every fact about them matches: symbol, detection time, the move
  * itself, and the price range it moved across. A symbol legitimately shows
  * up many times with different timestamps/movements/price ranges (different
- * review windows) — that is not a duplicate and must never be collapsed.
+ * review windows) - that is not a duplicate and must never be collapsed.
  * This only ever removes a row that is a byte-for-byte repeat of another.
  */
 function dedupeIdenticalEvents(entries: TimelineEntry[]): TimelineEntry[] {
@@ -68,7 +68,7 @@ export function Timeline({
         <CardBody className="py-14 text-center">
           <h2 className="text-lg font-semibold text-ink-900">No history yet</h2>
           <p className="mx-auto mt-2 max-w-sm text-sm text-ink-500">
-            When you review a brief, whatever it surfaced is recorded here — so
+            When you review a brief, whatever it surfaced is recorded here - so
             you can look back at what mattered on a given day.
           </p>
         </CardBody>
@@ -127,12 +127,12 @@ export function Timeline({
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot[entry.severity]}`}
                       />
-                      {/* symbol + company — one fixed-width column, same
+                      {/* symbol + company - one fixed-width column, same
                           shape on every row and at every viewport width, so
                           the identity block never overlaps the columns after
                           it. Symbol on top (bold/prominent), company name
                           underneath (smaller, muted) whenever the universe
-                          has one for this symbol — including when it's the
+                          has one for this symbol - including when it's the
                           same word as the symbol (ZOMATO/Zomato, ITC/ITC):
                           consistency across rows matters more than avoiding
                           that visual repeat. */}

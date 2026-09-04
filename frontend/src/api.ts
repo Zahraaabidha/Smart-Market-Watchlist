@@ -61,7 +61,10 @@ async function request<T>(
     throw new ApiError(0, "Cannot reach the server. Check your connection.");
   }
 
-  if (response.status === 401) {
+  // A 401 with no token attached is a rejected login attempt, not an expired
+  // session - surface the backend's actual message (e.g. "invalid email or
+  // password") instead of claiming a session that never existed just ended.
+  if (response.status === 401 && token) {
     setToken(null);
     throw new ApiError(401, "Your session expired. Please sign in again.");
   }

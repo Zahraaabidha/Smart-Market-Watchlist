@@ -83,7 +83,7 @@ export function Sidebar({
             </svg>
           </span>
           <span className="text-sm font-semibold tracking-tight text-ink-900">
-            Watchlist
+            Groww Focus
           </span>
         </div>
 
@@ -209,7 +209,7 @@ export function MobileTopBar({ onOpen }: { onOpen: () => void }) {
             />
           </svg>
         </span>
-        Watchlist
+        Groww Focus
       </span>
     </div>
   );

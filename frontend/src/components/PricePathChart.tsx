@@ -5,7 +5,7 @@ import { clockTime, price } from "@/format";
 /**
  * The signature chart: the route a price took across the user's absence.
  *
- * Hand-rolled SVG rather than a charting dependency — the shape it must draw is
+ * Hand-rolled SVG rather than a charting dependency - the shape it must draw is
  * specific (a shaded absence band, a checkpoint marker, the two intra-window
  * extremes, the current value) and every one of those is a few lines here. It
  * stays under ~200 lines and pulls nothing new into the bundle.
@@ -196,7 +196,7 @@ export function PricePathChart({ detail }: { detail: SymbolPathDetail }) {
           strokeLinecap="round"
         />
 
-        {/* extreme markers — label flips inward when close to an edge */}
+        {/* extreme markers - label flips inward when close to an edge */}
         <Marker
           x={m.px(m.pts[m.hiIdx].t)}
           y={m.py(m.pts[m.hiIdx].v)}

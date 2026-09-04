@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    app_name: str = "Smart Market Watchlist"
+    app_name: str = "Groww Focus"
     environment: str = "development"
     demo_mode: bool = True
 

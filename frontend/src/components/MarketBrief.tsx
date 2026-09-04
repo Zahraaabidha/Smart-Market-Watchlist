@@ -14,7 +14,7 @@ import { AttentionRow } from "./AttentionCard";
 import { Sparkline } from "./Sparkline";
 
 /**
- * The Brief — an attention dashboard.
+ * The Brief - an attention dashboard.
  *
  * Fixed shape whatever the number of changes: hero → "N things need your
  * attention" → a single ranked list of the changes (score-ordered) → the data
@@ -56,7 +56,7 @@ export function MarketBrief({
             Nothing on this watchlist yet
           </h2>
           <p className="mx-auto mt-2 max-w-sm text-sm text-ink-500">
-            Add a few symbols on the Manage tab and the brief will start
+            Add a few symbols on the Watchlist tab and the brief will start
             tracking what changes between your visits.
           </p>
         </CardBody>
@@ -66,7 +66,7 @@ export function MarketBrief({
 
   return (
     <div className="space-y-3">
-      {/* ── HERO — page header, not a dashboard card ──────────── */}
+      {/* ── HERO - page header, not a dashboard card ──────────── */}
       <header className="border-b border-line pb-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -197,7 +197,7 @@ export function MarketBrief({
                   {signedPct(strongest.change_pct)}
                 </span>
                 {swingText(strongest.reasons) && (
-                  <> — {swingText(strongest.reasons)}</>
+                  <> - {swingText(strongest.reasons)}</>
                 )}
                 .
               </p>

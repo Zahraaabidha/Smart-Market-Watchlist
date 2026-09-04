@@ -22,7 +22,7 @@ export function clockTime(iso: string | null): string {
   });
 }
 
-/** "3h 12m", "48m", "2d 4h" — the length of an absence window. */
+/** "3h 12m", "48m", "2d 4h" - the length of an absence window. */
 export function durationBetween(
   startIso: string | null,
   endIso: string,
@@ -122,7 +122,7 @@ export function sourceCopy(source: {
     };
   return {
     label: "Replay data",
-    help: "Deterministic simulated market — reproducible, not a live exchange feed.",
+    help: "Deterministic simulated market - reproducible, not a live exchange feed.",
     tone: "sim",
   };
 }

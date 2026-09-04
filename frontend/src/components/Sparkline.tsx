@@ -5,7 +5,7 @@ import type { PricePath } from "@/types";
  * A compact price path for an attention card.
  *
  * Hand-rolled inline SVG, no charting library: the card only needs the shape
- * of the move plus two markers — where the price was when the user last
+ * of the move plus two markers - where the price was when the user last
  * checked, and the intra-window extreme an endpoint comparison would hide.
  * The full labelled chart lives in the detail view.
  */
@@ -19,7 +19,7 @@ export function Sparkline({
   path: PricePath;
   width?: number;
   height?: number;
-  /** Faint fill under the line — for the larger "while you were away" card. */
+  /** Faint fill under the line - for the larger "while you were away" card. */
   area?: boolean;
   className?: string;
 }) {
@@ -52,7 +52,7 @@ export function Sparkline({
     const last = pts[pts.length - 1];
 
     // The extreme worth marking is whichever of high/low is further from the
-    // checkpoint price — that is the excursion the card is drawing attention to.
+    // checkpoint price - that is the excursion the card is drawing attention to.
     const extremeUp = Math.abs(hi - checkpoint) >= Math.abs(checkpoint - lo);
     const extremeVal = extremeUp ? hi : lo;
     const extremeIdx = pts.reduce(

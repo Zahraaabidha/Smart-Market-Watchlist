@@ -117,16 +117,16 @@ interface ListboxProps<T extends string | number> {
  *
  * A native select can only ever be half-styled: the closed trigger is a real
  * element in the page and takes CSS fine, but the instant it opens, the
- * option list is drawn by the OS/browser shell *outside* the page — no CSS
+ * option list is drawn by the OS/browser shell *outside* the page - no CSS
  * reaches it, which is why it always shows the platform's own font and its
  * own (usually bright, OS-blue) highlight no matter how the control itself
  * is styled. This renders the open menu in-page instead, so every pixel of
- * it — background, border, hover state — is ours.
+ * it - background, border, hover state - is ours.
  *
  * Follows the ARIA "collapsible dropdown listbox" pattern: a `button` with
  * `aria-haspopup="listbox"`/`aria-expanded`, and while open,
  * `aria-activedescendant` tracks the highlighted option without ever moving
- * DOM focus off the button — so Escape, the arrow keys, and Enter all just
+ * DOM focus off the button - so Escape, the arrow keys, and Enter all just
  * work without a separate focus-trap.
  */
 export function Listbox<T extends string | number>({
@@ -152,7 +152,7 @@ export function Listbox<T extends string | number>({
 
   // Close on an outside click. `mousedown`, not `click`, so that clicking a
   // *different* row's trigger closes this one before that row's own click
-  // handler opens it — two of these never end up open at once from a single
+  // handler opens it - two of these never end up open at once from a single
   // click, and one row's menu never reaches into another's.
   useEffect(() => {
     if (!open) return;
@@ -164,8 +164,8 @@ export function Listbox<T extends string | number>({
   }, [open]);
 
   // Flip above the trigger when there isn't room below. A rough pre-paint
-  // estimate of the menu's height is enough here — the option list is short
-  // and a fixed row height — and avoids the flicker of a measure-then-move
+  // estimate of the menu's height is enough here - the option list is short
+  // and a fixed row height - and avoids the flicker of a measure-then-move
   // second pass.
   useEffect(() => {
     if (!open || !rootRef.current) return;

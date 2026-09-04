@@ -1,0 +1,25 @@
+{
+  "name": "smart-market-watchlist",
+  "version": "1.0.0",
+  "description": "**A watchlist should not make you scan the market. It should tell you what changed enough to matter.**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zahraaabidha/Smart-Market-Watchlist.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Zahraaabidha/Smart-Market-Watchlist/issues"
+  },
+  "homepage": "https://github.com/Zahraaabidha/Smart-Market-Watchlist#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.4.1"
+  }
+}

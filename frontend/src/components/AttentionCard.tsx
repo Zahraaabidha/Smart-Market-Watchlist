@@ -13,7 +13,7 @@ function swingHeadline(reasons: Change["reasons"]): string | null {
 }
 
 /**
- * The row's inline explanation — shown directly, no hover required.
+ * The row's inline explanation - shown directly, no hover required.
  * A swing gets its own richer sentence; otherwise the top one or two
  * contributing reasons, e.g. "threshold crossed" or
  * "threshold crossed · unusual movement".
@@ -63,7 +63,7 @@ export function AttentionRow({
         className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`}
         title={change.severity}
       />
-      {/* symbol — fixed but generous: wide enough that a normal ticker (up
+      {/* symbol - fixed but generous: wide enough that a normal ticker (up
           to ~11 characters, the longest in this app's universe, e.g.
           TATAMOTORS) always renders in full. `truncate` stays on only as a
           last-resort safety net for something genuinely abnormal; it should
@@ -74,12 +74,12 @@ export function AttentionRow({
       >
         {change.symbol}
       </span>
-      {/* company — its own column, separate from the symbol; only an
+      {/* company - its own column, separate from the symbol; only an
           unusually long company name (not the symbol) ever truncates here. */}
       <span className="hidden w-28 shrink-0 truncate text-[11px] text-ink-400 lg:block xl:w-36">
         {company ?? ""}
       </span>
-      {/* change% — never ellipsized (a truncated number reads as wrong, not
+      {/* change% - never ellipsized (a truncated number reads as wrong, not
           just cut off), so this is sized to comfortably fit a 3-digit move
           and only prevented from wrapping. */}
       <span
@@ -93,7 +93,7 @@ export function AttentionRow({
           <Sparkline path={change.path} width={72} height={22} />
         </span>
       )}
-      {/* reason — shown inline always (no hover needed for the basic
+      {/* reason - shown inline always (no hover needed for the basic
           explanation); the only flexible column, taking whatever space the
           fixed columns around it leave, ellipsizing rather than wrapping or
           overflowing if that space gets tight. */}

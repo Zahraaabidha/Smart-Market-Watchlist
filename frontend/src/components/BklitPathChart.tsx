@@ -21,11 +21,11 @@ import { clockTime, price, signedPct } from "@/format";
  * you were away" band is a barely-there wash. Four markers, each a distinct
  * style so none reads as another: the checkpoint ("you left") is small and
  * hollow; intra-window high/low and the current point are filled with a
- * restrained white outline. No permanent text sits on the plot — which
+ * restrained white outline. No permanent text sits on the plot - which
  * marker is which, and its exact value/time, shows entirely in a light
  * tooltip on hover. Real backend points, real high/low, tight y-domain.
  *
- * Points the backend flags `gap_before` (a genuine break in data collection —
+ * Points the backend flags `gap_before` (a genuine break in data collection -
  * see `app/services/brief.py::_gap_threshold`) are never bridged with a solid
  * stroke: that would draw continuous market data across a stretch where none
  * was collected. Where a gap exists the line is split into real segments,
@@ -39,6 +39,12 @@ const GAP_STROKE = "#b7bcc6";
 // near, so a fixed dark neutral is the only fill that can never coincide
 // with either of them.
 const NOW_COLOR = "#0f1729";
+
+// Exact price, not "2k"/"3k" - a trader reading this axis wants the real
+// number. Ticks from d3's `scale.ticks()` are already "nice" round values,
+// so this only ever adds thousands separators; it never introduces decimals.
+const axisPriceFmt = (value: number) =>
+  value.toLocaleString("en-US", { maximumFractionDigits: 0 });
 
 type Row = { date: Date; price: number; gapBefore: boolean };
 
@@ -59,23 +65,23 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
     const lo = Number(detail.window_low);
 
     // `checkpointDate` (used for the shaded "while you were away" band) is
-    // the real moment the user reviewed — a fact about *when they left*.
+    // the real moment the user reviewed - a fact about *when they left*.
     // `checkpoint_price` is the last price actually known at/before that
     // moment, which the backend anchors to whichever snapshot's timestamp is
     // closest-but-not-after it. Those two are usually the same instant, but
     // when the review moment falls inside a genuine collection gap they can
-    // be tens of minutes apart — and pairing the *review* timestamp with a
+    // be tens of minutes apart - and pairing the *review* timestamp with a
     // price observed much earlier put the "you left" marker at an (x, y)
     // that the rendered stroke never actually passes through, since the
     // stroke between two real points is a straight interpolation between
     // *their* prices, not a flat line at the earlier one.
     //
     // `checkpointMarkerDate` is the fix: the real observation timestamp that
-    // `checkpoint_price` itself was measured at — i.e. `rows[0]`, the first
+    // `checkpoint_price` itself was measured at - i.e. `rows[0]`, the first
     // plotted point. Pairing the price with *its own* timestamp (rather than
     // the separate review-click timestamp) guarantees the marker sits at an
-    // (x, y) that is a real, single, internally-consistent data point — the
-    // literal start of the line — using nothing but xScale/yScale. Nothing
+    // (x, y) that is a real, single, internally-consistent data point - the
+    // literal start of the line - using nothing but xScale/yScale. Nothing
     // about the checkpoint price or the review timestamp itself changes;
     // only which of the two already-real timestamps the *dot* is drawn at.
     const checkpointDate = detail.checkpoint_at
@@ -90,7 +96,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
         rows[0],
       );
 
-    // Real, contiguous runs of data — split wherever the backend says a
+    // Real, contiguous runs of data - split wherever the backend says a
     // stretch was genuinely never collected. `gaps` records exactly what
     // each break spans, for the honest dashed connector and the caption.
     const segments: Row[][] = [];
@@ -109,7 +115,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
 
     // A little horizontal breathing room so the first/last markers (and the
     // line's own endpoints) don't sit flush against the plot edges. This
-    // only widens the *axis*'s rendered range — the underlying points and
+    // only widens the *axis*'s rendered range - the underlying points and
     // their timestamps are untouched; nothing is added, moved, or inferred.
     const firstDate = rows[0].date;
     const lastDate = rows[rows.length - 1].date;
@@ -169,7 +175,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
             fadeHorizontal={false}
           />
 
-          {/* while you were away — a faint wash, no border */}
+          {/* while you were away - a faint wash, no border */}
           <ReferenceArea
             x1={model.checkpointDate}
             fill="#2b59d9"
@@ -179,7 +185,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
 
           <Line
             dataKey="price"
-            // The shared `Line` renderer has no notion of a gap — it always
+            // The shared `Line` renderer has no notion of a gap - it always
             // draws one continuous stroke through `data`. Rather than teach
             // the shared chart primitive a one-off "don't connect these two
             // points" rule, this instance's own stroke is made invisible
@@ -203,7 +209,7 @@ export function BklitPathChart({ detail }: { detail: SymbolPathDetail }) {
             />
           )}
 
-          <YAxis numTicks={4} />
+          <YAxis numTicks={4} formatValue={axisPriceFmt} />
           <TimeAxis />
 
           <PathMarkers
@@ -305,7 +311,7 @@ function LegendDot({
   label: string;
   ring?: string;
   fill?: string;
-  /** A short dashed swatch instead of a dot — the "gap in data" key. */
+  /** A short dashed swatch instead of a dot - the "gap in data" key. */
   dashed?: boolean;
 }) {
   return (
@@ -336,7 +342,7 @@ function LegendDot({
   );
 }
 
-/** "2 gaps, largest 1h 12m" / "1 gap, 29m" — for the honest footer caption. */
+/** "2 gaps, largest 1h 12m" / "1 gap, 29m" - for the honest footer caption. */
 function gapSummary(gaps: { from: Row; to: Row }[]): string {
   const spans = gaps.map((g) => +g.to.date - +g.from.date);
   const longest = Math.max(...spans);
@@ -354,7 +360,7 @@ function gapSummary(gaps: { from: Row; to: Row }[]): string {
 /**
  * The gap-aware replacement for `<Line>`'s own stroke (which is made
  * transparent by the caller whenever this renders). One solid `<path>` per
- * real contiguous run of data — never a single path spanning a gap — plus a
+ * real contiguous run of data - never a single path spanning a gap - plus a
  * thin dashed connector across each gap so its presence and rough size are
  * visible rather than just an unexplained blank stretch. Uses the same
  * `xScale`/`yScale` the rest of the chart's overlays (`PathMarkers`,
@@ -422,7 +428,7 @@ function SegmentedStroke({
 
 type Pt = { date: Date; value: number };
 
-/** Dots on the line — no text on the plot; details live in the tooltip. */
+/** Dots on the line - no text on the plot; details live in the tooltip. */
 function PathMarkers({
   checkpoint,
   high,
@@ -435,7 +441,7 @@ function PathMarkers({
   now: Pt;
 }) {
   // Every marker's position comes straight out of the same xScale/yScale the
-  // line itself is drawn with — no hard-coded pixel nudging, no separate
+  // line itself is drawn with - no hard-coded pixel nudging, no separate
   // pixel-space math. `checkpoint` is `{ checkpointMarkerDate, checkpoint }`
   // from the model above: the real timestamp the checkpoint price was itself
   // observed at, so this always resolves to a genuine point on the line
@@ -453,26 +459,26 @@ function PathMarkers({
   // Four deliberately distinct marker styles, so none can ever be mistaken
   // for another at a glance:
   //   - checkpoint ("you left"): small and *truly* hollow (fill: none, thin
-  //     gray ring) — a reference point, not an event.
+  //     gray ring) - a reference point, not an event.
   //   - high: filled green, ringed in a restrained white outline.
   //   - low: filled red, ringed the same way.
   //   - now: filled with a fixed dark neutral (never green/red, so it can
   //     never read as "another high" or "another low" even when the trend
   //     since checkpoint happens to be up or down), white outline, slightly
-  //     larger — it's the endpoint the whole chart is building up to.
+  //     larger - it's the endpoint the whole chart is building up to.
   // No text is drawn here; which marker is which, and its exact value/time,
   // lives entirely in the tooltip on hover.
   //
   // Overlap: the checkpoint price is sometimes *also* the window's high or
   // low (e.g. the price only ever fell after you left) or coincides with
   // `now`. None of the four markers is ever moved off its real (x, y) to
-  // dodge another — that would break "exactly at the checkpoint
+  // dodge another - that would break "exactly at the checkpoint
   // timestamp/price" for checkpoint and "do not move high/low/now" for the
   // rest. Instead, checkpoint alone is rendered with no fill and a
   // slightly larger radius than the filled markers, and painted last (on
   // top). A ring with nothing in its interior never hides whatever else is
   // drawn under it, so a filled high/low/now dot sitting at the exact same
-  // point still shows through the middle of the checkpoint ring — both
+  // point still shows through the middle of the checkpoint ring - both
   // remain visible, coordinates untouched.
   const marker = (
     pt: { x: number; y: number },
@@ -496,15 +502,15 @@ function PathMarkers({
 
   return (
     <g className="chart-path-markers" pointerEvents="none">
-      {/* intra-window high — ~6px, filled, restrained white outline */}
+      {/* intra-window high - ~6px, filled, restrained white outline */}
       {marker(hN, { r: 3, fill: UP, stroke: "#fff", strokeWidth: 1.5 })}
-      {/* intra-window low — ~6px, filled, restrained white outline */}
+      {/* intra-window low - ~6px, filled, restrained white outline */}
       {marker(lN, { r: 3, fill: DOWN, stroke: "#fff", strokeWidth: 1.5 })}
-      {/* now — ~7px, slightly larger than high/low, neutral fill (never
+      {/* now - ~7px, slightly larger than high/low, neutral fill (never
           green/red), white outline */}
       {marker(nw, { r: 3.5, fill: NOW_COLOR, stroke: "#fff", strokeWidth: 1.75 })}
-      {/* you left — small hollow ring, painted last (on top) and with no
-          fill so it never obscures — and is never obscured by — a filled
+      {/* you left - small hollow ring, painted last (on top) and with no
+          fill so it never obscures - and is never obscured by - a filled
           marker that happens to sit at the exact same point (see comment
           above); slightly larger radius than the filled markers so that
           ring reads clearly even when one of them is dead-center inside it */}
@@ -518,7 +524,7 @@ function PathMarkers({
  * ticks instead of a single "Sep 4"; longer windows fall back to dates.
  */
 function TimeAxis() {
-  const { xScale, innerHeight } = useChartStable();
+  const { xScale, innerHeight, innerWidth } = useChartStable();
   const domain = xScale.domain() as [Date, Date];
   const t0 = +domain[0];
   const t1 = +domain[1];
@@ -530,7 +536,12 @@ function TimeAxis() {
       ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
       : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-  const N = 5;
+  // Fixed at 5 ticks, evenly spaced labels ("12:45 AM") ran into each other
+  // on a narrow chart (e.g. the mobile layout) - there just isn't 5 * ~60px
+  // of room. Thin the tick count out to whatever the container can actually
+  // fit rather than let neighbouring labels overlap.
+  const minLabelPx = intraday ? 78 : 58;
+  const N = Math.max(2, Math.min(5, Math.floor(innerWidth / minLabelPx)));
   const ticks = Array.from({ length: N }, (_, i) => new Date(t0 + ((t1 - t0) * i) / (N - 1)));
 
   return (
