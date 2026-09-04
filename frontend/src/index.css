@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-950 text-slate-200 antialiased;
+  }
+  /* Tabular figures stop prices from jittering horizontally as they update,
+     which is distracting on a screen the user is scanning for changes. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}

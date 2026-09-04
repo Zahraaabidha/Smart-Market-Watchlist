@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: watchlist
+      POSTGRES_PASSWORD: watchlist
+      POSTGRES_DB: watchlist
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watchlist -d watchlist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://watchlist:watchlist@db:5432/watchlist
+      ENVIRONMENT: development
+      DEMO_MODE: "true"
+      SECRET_KEY: ${SECRET_KEY:-insecure-demo-key-do-not-use-in-production}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
