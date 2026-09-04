@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, getToken, setToken } from "./api";
-import type { Brief, Item, Preferences, Watchlist } from "./types";
+import type { Brief, Item, Preferences, TimelineEntry, Watchlist } from "./types";
 import { MarketBrief } from "./components/MarketBrief";
 import { WatchlistPanel } from "./components/WatchlistPanel";
 import { SignIn } from "./components/SignIn";
+import { Timeline } from "./components/Timeline";
 
 const REFRESH_MS = 20_000;
 
-type Tab = "brief" | "watchlist";
+type Tab = "brief" | "history" | "watchlist";
 
 export default function App() {
   const [authed, setAuthed] = useState(() => getToken() !== null);
@@ -18,6 +19,8 @@ export default function App() {
   const [watchlist, setWatchlist] = useState<Watchlist | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -108,6 +111,30 @@ export default function App() {
     }
   }
 
+  // Loaded only when the history tab is opened. It is not needed to answer
+  // "what should I look at now", so fetching it with every brief would be work
+  // most visits never use.
+  useEffect(() => {
+    if (!authed || tab !== "history" || !watchlist) return;
+    let cancelled = false;
+    setTimelineLoading(true);
+    api
+      .timeline(watchlist.id)
+      .then((rows) => {
+        if (!cancelled) setTimeline(rows);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(err instanceof Error ? err.message : "Could not load history.");
+      })
+      .finally(() => {
+        if (!cancelled) setTimelineLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, tab, watchlist]);
+
   async function handleCheckpoint() {
     if (!watchlist || !brief) return;
     setCheckpointing(true);
@@ -145,7 +172,7 @@ export default function App() {
             Watchlist
           </span>
           <div className="flex gap-1">
-            {(["brief", "watchlist"] as const).map((name) => (
+            {(["brief", "history", "watchlist"] as const).map((name) => (
               <button
                 key={name}
                 onClick={() => setTab(name)}
@@ -155,7 +182,11 @@ export default function App() {
                     : "text-slate-500 hover:text-slate-300"
                 }`}
               >
-                {name === "brief" ? "Brief" : "Manage"}
+                {name === "brief"
+                  ? "Brief"
+                  : name === "history"
+                    ? "History"
+                    : "Manage"}
               </button>
             ))}
           </div>
@@ -195,6 +226,8 @@ export default function App() {
               checkpointing={checkpointing}
             />
           )
+        ) : tab === "history" ? (
+          <Timeline entries={timeline} loading={timelineLoading} />
         ) : (
           <WatchlistPanel
             watchlist={watchlist}

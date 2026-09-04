@@ -7,6 +7,7 @@ without spinning up a request.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -21,6 +22,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.persistence.db import get_session
 from app.persistence.models import User
 from app.services import brief as brief_service
+from app.services import history as history_service
 from app.services import watchlists as wl
 
 router = APIRouter()
@@ -278,13 +280,72 @@ def create_checkpoint(
     session: Session = Depends(get_session),
     now: datetime = Depends(utcnow),
 ):
-    """Explicitly mark the market as seen, resetting the comparison window."""
+    """Explicitly mark the market as seen, resetting the comparison window.
+
+    The brief is built *before* the new checkpoint is recorded, so the changes
+    written to history are the ones whose window this checkpoint closes. Doing
+    it the other way round would record an empty window every time.
+    """
     try:
-        return wl.record_checkpoint(
+        watchlist = wl.get_owned_watchlist(session, user, watchlist_id)
+        closing = brief_service.build_brief(session, user, watchlist, now)
+
+        checkpoint = wl.record_checkpoint(
             session, user, watchlist_id, now, payload.idempotency_key
         )
+
+        # A replayed idempotency key returns the original checkpoint, whose
+        # history was written on the first call. Writing again would duplicate
+        # the timeline entries that idempotency exists to prevent.
+        if checkpoint.checked_at == now:
+            history_service.record_changes(
+                session, watchlist_id, checkpoint.id, closing.attention, now
+            )
+
+        return checkpoint
     except AppError as exc:
         raise _fail(exc) from exc
+
+
+@brief_router.get(
+    "/watchlists/{watchlist_id}/timeline",
+    response_model=list[schemas.TimelineEntry],
+)
+def get_timeline(
+    watchlist_id: int,
+    limit: int = 50,
+    before_id: int | None = None,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
+    """What this watchlist surfaced previously, newest first."""
+    try:
+        wl.get_owned_watchlist(session, user, watchlist_id)
+    except AppError as exc:
+        raise _fail(exc) from exc
+
+    limit = max(1, min(limit, 200))
+    rows = history_service.load_timeline(session, watchlist_id, limit, before_id)
+
+    return [
+        schemas.TimelineEntry(
+            id=row.id,
+            symbol=symbol,
+            change_type=row.change_type,
+            severity=row.severity,
+            score=float(row.score),
+            previous_value=row.previous_value,
+            current_value=row.current_value,
+            change_pct=float(row.change_pct),
+            detected_at=row.detected_at,
+            source_timestamp=row.source_timestamp,
+            freshness=row.freshness,
+            reasons=[
+                schemas.ReasonResponse(**r) for r in json.loads(row.explanation)
+            ],
+        )
+        for row, symbol in rows
+    ]
 
 
 def _change_to_schema(change) -> schemas.ChangeResponse:

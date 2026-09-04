@@ -58,3 +58,18 @@ export interface Preferences {
   volume_sensitivity: number;
   swing_sensitivity: number;
 }
+
+export interface TimelineEntry {
+  id: number;
+  symbol: string;
+  change_type: string;
+  severity: Severity;
+  score: number;
+  previous_value: string;
+  current_value: string;
+  change_pct: number;
+  detected_at: string;
+  source_timestamp: string;
+  freshness: Freshness;
+  reasons: Reason[];
+}

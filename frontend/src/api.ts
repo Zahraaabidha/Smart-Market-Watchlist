@@ -1,4 +1,4 @@
-import type { Brief, Item, Preferences, Watchlist } from "./types";
+import type { Brief, Item, Preferences, TimelineEntry, Watchlist } from "./types";
 
 const TOKEN_KEY = "smw.token";
 
@@ -91,6 +91,9 @@ export const api = {
   watchlists: () => request<Watchlist[]>("/watchlists"),
 
   brief: (id: number) => request<Brief>(`/watchlists/${id}/brief`),
+
+  timeline: (id: number, limit = 50) =>
+    request<TimelineEntry[]>(`/watchlists/${id}/timeline?limit=${limit}`),
 
   checkpoint: (id: number, idempotencyKey: string) =>
     request<{ id: number; checked_at: string }>(

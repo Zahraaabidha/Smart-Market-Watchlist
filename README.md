@@ -105,6 +105,25 @@ rather than a last-known price.
 
 ---
 
+## "Since you last checked" history
+
+Marking a brief as read closes its window, and whatever that brief surfaced is
+written to `meaningful_changes` against the checkpoint that closed it. The
+**History** tab reads it back, grouped by day.
+
+These are **records, not recomputations.** The brief could in principle be
+rebuilt from snapshots, but the derivation is only stable while its inputs are:
+baselines shift as the window advances and old snapshots age out, so
+recomputing last Tuesday's brief next month can legitimately give a different
+answer. A user asking "what was I told on Tuesday?" needs the answer they were
+actually shown, so the explanation text and score are stored verbatim.
+
+Paging is keyset-based on the primary key rather than `OFFSET`, which stays
+fast as history grows and cannot skip or repeat rows when new entries arrive
+mid-scroll.
+
+---
+
 ## Data freshness as a first-class concept
 
 Freshness is always derived from the **source timestamp** — when the market
@@ -364,6 +383,8 @@ silently erase exactly the changes they came back for.
   bars, so "normal volatility" reflects the simulated series.
 - One watchlist per user is surfaced in the UI, though the schema and API
   support many.
+- History records only meaningful changes. Keeping a row per quiet symbol per
+  check would grow without bound to record that nothing happened.
 - No email verification or password reset.
 - **No outlier rejection on incoming prices.** A feed glitch reporting a 4x
   price would be scored as a genuine move and surfaced as critical. This is a

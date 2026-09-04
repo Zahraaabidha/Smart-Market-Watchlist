@@ -317,3 +317,26 @@ out.
 are different events that happen to look identical to a timestamp comparison.
 Conflating them corrupted the feed-quality metric and made backfill useless.
 Historical rows are still never promoted over newer state.
+
+---
+
+## 22. Surfaced changes are stored, not recomputed
+
+`meaningful_changes` rows are written when a brief is marked as read, carrying
+the explanation text verbatim.
+
+**Rejected:** deriving the timeline from snapshots on demand, which would need
+no extra table at all.
+
+**Why:** the engine is deterministic, but only given fixed inputs. Baselines
+move as the window advances and old snapshots age out of it, so replaying last
+Tuesday's brief a month later can honestly produce a different score and
+different wording. "What was I told on Tuesday?" is a question about the past,
+not a question about what the current model thinks about the past.
+
+Only meaningful changes are stored. A row per quiet symbol per check would grow
+without bound to record that nothing happened.
+
+The write is guarded by the same idempotency key as the checkpoint: a replayed
+key returns the original checkpoint and skips the write, so a double-submit
+cannot duplicate timeline entries.

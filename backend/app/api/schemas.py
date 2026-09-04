@@ -154,3 +154,20 @@ class BriefResponse(BaseModel):
     unavailable_symbols: list[str]
     overall_freshness: str
     window_truncated: bool
+
+
+class TimelineEntry(BaseModel):
+    """A change that was surfaced to the user at some past checkpoint."""
+
+    id: int
+    symbol: str
+    change_type: str
+    severity: str
+    score: float
+    previous_value: Decimal
+    current_value: Decimal
+    change_pct: float
+    detected_at: datetime
+    source_timestamp: datetime
+    freshness: str
+    reasons: list[ReasonResponse]
