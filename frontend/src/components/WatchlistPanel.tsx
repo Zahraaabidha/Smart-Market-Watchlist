@@ -4,16 +4,14 @@ import { Button, Card, CardBody, SectionLabel } from "@/components/ui";
 import { companyName } from "@/universe";
 
 /**
- * Watchlist management and attention preferences.
- *
- * Kept off the brief on purpose: this is the screen you visit occasionally to
- * configure things; the brief is the one you visit daily to read them.
+ * Watchlist management and attention preferences, as a compact configuration
+ * dashboard. Semantics and values are unchanged from before — only the layout.
  */
-const PRIORITY_LABEL: Record<number, string> = {
-  1: "High",
-  2: "Normal",
-  3: "Low",
-};
+const PRIORITY_LABEL: Record<number, string> = { 1: "High", 2: "Normal", 3: "Low" };
+
+const selectCls =
+  "rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-sm text-ink-700 " +
+  "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25";
 
 export function WatchlistPanel({
   watchlist,
@@ -55,58 +53,57 @@ export function WatchlistPanel({
     setSymbol("");
   }
 
-  const select =
-    "rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-sm text-ink-700 " +
-    "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25";
-
   return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <SectionLabel>Symbols in {watchlist.name}</SectionLabel>
+    <div className="space-y-6">
+      {/* ── Add stock ─────────────────────────────────────── */}
+      <Card>
+        <CardBody className="py-4">
+          <SectionLabel>Add a stock</SectionLabel>
+          <form onSubmit={submit} className="mt-3 flex flex-wrap gap-2">
+            <input
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              placeholder="Symbol (e.g. SBIN)"
+              maxLength={20}
+              className={
+                "min-w-[12rem] flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm " +
+                "text-ink-900 placeholder:text-ink-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+              }
+            />
+            <select
+              value={priority}
+              onChange={(e) => setPriority(Number(e.target.value))}
+              className={selectCls}
+            >
+              <option value={1}>High priority</option>
+              <option value={2}>Normal</option>
+              <option value={3}>Low priority</option>
+            </select>
+            <Button type="submit" variant="primary" disabled={busy || !symbol.trim()}>
+              Add
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
 
-        <form onSubmit={submit} className="flex flex-wrap gap-2">
-          <input
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
-            placeholder="Add a symbol (e.g. SBIN)"
-            maxLength={20}
-            className={
-              "min-w-[12rem] flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm " +
-              "text-ink-900 placeholder:text-ink-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
-            }
-          />
-          <select
-            value={priority}
-            onChange={(e) => setPriority(Number(e.target.value))}
-            className={select}
-          >
-            <option value={1}>High priority</option>
-            <option value={2}>Normal</option>
-            <option value={3}>Low priority</option>
-          </select>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={busy || !symbol.trim()}
-          >
-            Add
-          </Button>
-        </form>
+      {/* ── Watchlist rows ────────────────────────────────── */}
+      <Card>
+        <CardBody className="py-4">
+          <div className="flex items-baseline justify-between">
+            <SectionLabel>{watchlist.name}</SectionLabel>
+            <span className="text-[11px] text-ink-400">
+              {items.length} {items.length === 1 ? "symbol" : "symbols"}
+            </span>
+          </div>
 
-        {items.length === 0 ? (
-          <Card className="border-dashed">
-            <CardBody className="py-8 text-center text-sm text-ink-500">
+          {items.length === 0 ? (
+            <p className="mt-4 rounded-lg border border-dashed border-line px-4 py-6 text-center text-sm text-ink-500">
               No symbols yet. Add one above to start tracking it.
-            </CardBody>
-          </Card>
-        ) : (
-          <Card>
-            <ul className="divide-y divide-line">
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y divide-line">
               {items.map((item, index) => (
-                <li
-                  key={item.id}
-                  className="flex items-center gap-3 px-3 py-2.5 text-sm"
-                >
+                <li key={item.id} className="flex items-center gap-3 py-2.5">
                   <div className="flex flex-col text-ink-400">
                     <button
                       onClick={() => move(index, -1)}
@@ -126,23 +123,19 @@ export function WatchlistPanel({
                     </button>
                   </div>
 
-                  <div className="w-40">
-                    <div className="font-semibold text-ink-900">
-                      {item.symbol}
-                    </div>
-                    <div className="truncate text-xs text-ink-400">
-                      {companyName(item.symbol)}
+                  <div className="w-36 min-w-0">
+                    <div className="font-semibold text-ink-900">{item.symbol}</div>
+                    <div className="truncate text-[11px] text-ink-400">
+                      {companyName(item.symbol) ?? "—"}
                     </div>
                   </div>
 
                   <select
                     value={item.priority}
                     onChange={(e) =>
-                      void onUpdateItem(item.id, {
-                        priority: Number(e.target.value),
-                      })
+                      void onUpdateItem(item.id, { priority: Number(e.target.value) })
                     }
-                    className={select + " py-1 text-xs"}
+                    className={selectCls + " py-1 text-xs"}
                     aria-label={`Priority for ${item.symbol}`}
                   >
                     <option value={1}>High</option>
@@ -150,15 +143,13 @@ export function WatchlistPanel({
                     <option value={3}>Low</option>
                   </select>
 
-                  <span className="flex-1 text-xs text-ink-400">
+                  <span className="flex-1 truncate text-[11px] text-ink-400">
                     {item.threshold_above || item.threshold_below ? (
                       <>
                         Alerts:{" "}
-                        {item.threshold_above &&
-                          `above ${item.threshold_above}`}
+                        {item.threshold_above && `above ${item.threshold_above}`}
                         {item.threshold_above && item.threshold_below && ", "}
-                        {item.threshold_below &&
-                          `below ${item.threshold_below}`}
+                        {item.threshold_below && `below ${item.threshold_below}`}
                       </>
                     ) : (
                       "No price alerts"
@@ -179,65 +170,61 @@ export function WatchlistPanel({
                 </li>
               ))}
             </ul>
-          </Card>
-        )}
-      </section>
+          )}
+        </CardBody>
+      </Card>
 
+      {/* ── Sensitivity controls ──────────────────────────── */}
       {preferences && (
-        <section className="space-y-3">
-          <div>
-            <SectionLabel>What you want to hear about</SectionLabel>
-            <p className="mt-1 text-xs text-ink-400">
-              These change how the engine scores every symbol. Raising a
-              threshold means fewer, more significant alerts.
+        <section>
+          <div className="mb-3">
+            <SectionLabel>What you want surfaced</SectionLabel>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-ink-400">
+              These tune what <em>you</em> want the brief to raise — not what is
+              objectively important in the market. Raising a threshold means
+              fewer, more significant alerts for you.
             </p>
           </div>
 
-          <Card>
-            <CardBody className="space-y-6">
-              <SliderRow
-                label="Minimum move"
-                help="A price change smaller than this is not treated as meaningful."
-                value={preferences.min_move_pct}
-                suffix="%"
-                min={0.5}
-                max={15}
-                step={0.5}
-                onCommit={(v) => void onUpdatePreferences({ min_move_pct: v })}
-              />
-              <SliderRow
-                label="Volume sensitivity"
-                help="How many times its average volume a symbol must trade before that counts as conviction."
-                value={preferences.volume_sensitivity}
-                suffix="×"
-                min={1}
-                max={10}
-                step={0.5}
-                onCommit={(v) =>
-                  void onUpdatePreferences({ volume_sensitivity: v })
-                }
-              />
-              <SliderRow
-                label="Swing sensitivity"
-                help="Multiplier on your minimum move before a spike that reversed is worth reporting."
-                value={preferences.swing_sensitivity}
-                suffix="×"
-                min={1}
-                max={5}
-                step={0.25}
-                onCommit={(v) =>
-                  void onUpdatePreferences({ swing_sensitivity: v })
-                }
-              />
-            </CardBody>
-          </Card>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <SensitivityCard
+              label="Minimum move"
+              help="A price change smaller than this is not treated as meaningful."
+              value={preferences.min_move_pct}
+              suffix="%"
+              min={0.5}
+              max={15}
+              step={0.5}
+              onCommit={(v) => void onUpdatePreferences({ min_move_pct: v })}
+            />
+            <SensitivityCard
+              label="Volume sensitivity"
+              help="How many times its average volume a symbol must trade for that to count as conviction."
+              value={preferences.volume_sensitivity}
+              suffix="×"
+              min={1}
+              max={10}
+              step={0.5}
+              onCommit={(v) => void onUpdatePreferences({ volume_sensitivity: v })}
+            />
+            <SensitivityCard
+              label="Swing sensitivity"
+              help="Multiplier on your minimum move before a spike that reversed is worth reporting."
+              value={preferences.swing_sensitivity}
+              suffix="×"
+              min={1}
+              max={5}
+              step={0.25}
+              onCommit={(v) => void onUpdatePreferences({ swing_sensitivity: v })}
+            />
+          </div>
         </section>
       )}
     </div>
   );
 }
 
-function SliderRow({
+function SensitivityCard({
   label,
   help,
   value,
@@ -256,52 +243,51 @@ function SliderRow({
   step: number;
   onCommit: (value: number) => void;
 }) {
-  // Track locally while dragging; only hit the API on release, so a drag from
-  // 2 to 8 is one request rather than twelve.
   const [local, setLocal] = useState(value);
   const [dragging, setDragging] = useState(false);
-  // Adopt a server-confirmed value unless the user is mid-drag.
   useEffect(() => {
     if (!dragging) setLocal(value);
   }, [value, dragging]);
-  const shown = local;
-  const pct = ((shown - min) / (max - min)) * 100;
+  const pct = ((local - min) / (max - min)) * 100;
 
   return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <label className="text-sm font-medium text-ink-900">{label}</label>
-        <span className="text-sm font-semibold tnum text-ink-700">
-          {shown}
-          <span className="ml-0.5 text-ink-400">{suffix}</span>
-        </span>
+    <Card>
+      <div className="p-4">
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-semibold text-ink-900">{label}</span>
+          <span className="text-lg font-semibold tnum text-ink-900">
+            {local}
+            <span className="ml-0.5 text-xs text-ink-400">{suffix}</span>
+          </span>
+        </div>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={local}
+          onChange={(e) => setLocal(Number(e.target.value))}
+          onPointerDown={() => setDragging(true)}
+          onPointerUp={() => {
+            setDragging(false);
+            onCommit(local);
+          }}
+          onKeyUp={() => onCommit(local)}
+          aria-label={label}
+          className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none
+                     [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4
+                     [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                     [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-line-strong
+                     [&::-webkit-slider-thumb]:bg-surface [&::-webkit-slider-thumb]:shadow-card
+                     [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full
+                     [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-line-strong
+                     [&::-moz-range-thumb]:bg-surface"
+          style={{
+            background: `linear-gradient(to right, #2b59d9 ${pct}%, #e6e8ec ${pct}%)`,
+          }}
+        />
+        <p className="mt-2.5 text-[11px] leading-relaxed text-ink-400">{help}</p>
       </div>
-      <p className="mt-0.5 text-xs text-ink-400">{help}</p>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={shown}
-        onChange={(e) => setLocal(Number(e.target.value))}
-        onPointerDown={() => setDragging(true)}
-        onPointerUp={() => {
-          setDragging(false);
-          onCommit(local);
-        }}
-        onKeyUp={() => onCommit(local)}
-        className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none
-                   [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4
-                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-                   [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-line-strong
-                   [&::-webkit-slider-thumb]:bg-surface [&::-webkit-slider-thumb]:shadow-card
-                   [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full
-                   [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-line-strong
-                   [&::-moz-range-thumb]:bg-surface"
-        style={{
-          background: `linear-gradient(to right, #2b59d9 ${pct}%, #e6e8ec ${pct}%)`,
-        }}
-      />
-    </div>
+    </Card>
   );
 }

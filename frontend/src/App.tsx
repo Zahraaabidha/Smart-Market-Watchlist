@@ -44,6 +44,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkpointing, setCheckpointing] = useState(false);
+  const [justReviewedAt, setJustReviewedAt] = useState<string | null>(null);
   const [demoBusy, setDemoBusy] = useState(false);
 
   // Retains the last good brief across a failed refresh so a transient network
@@ -160,8 +161,13 @@ export default function App() {
     try {
       // Keyed on the brief the user actually read. Re-clicking the button for
       // the same brief is a no-op server-side, so a double tap cannot collapse
-      // the comparison window.
-      await api.checkpoint(watchlist.id, `brief-${brief.generated_at}`);
+      // the comparison window. Backend checkpoint semantics are unchanged; this
+      // is still an explicit, user-initiated action.
+      const result = await api.checkpoint(
+        watchlist.id,
+        `brief-${brief.generated_at}`,
+      );
+      setJustReviewedAt(result.checked_at);
       await load(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save checkpoint.");
@@ -204,6 +210,7 @@ export default function App() {
         onTab={(t) => {
           setTab(t);
           setPathSymbol(null);
+          setJustReviewedAt(null);
         }}
         source={source}
         onDemo={runDemo}
@@ -211,7 +218,7 @@ export default function App() {
         onSignOut={signOut}
       />
 
-      <main className="mx-auto max-w-4xl px-4 py-8">
+      <main className="mx-auto max-w-5xl px-4 py-8">
         {error && (
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-sev-bg-critical bg-sev-bg-critical px-4 py-3 text-sm text-sev-critical">
             <span className="flex-1">{error}</span>
@@ -242,6 +249,7 @@ export default function App() {
               brief={brief}
               onCheckpoint={handleCheckpoint}
               checkpointing={checkpointing}
+              justReviewedAt={justReviewedAt}
               onOpenPath={(symbol) => setPathSymbol(symbol)}
             />
           )
@@ -297,7 +305,7 @@ function Header({
   const chip = source ? sourceCopy(source) : null;
   return (
     <header className="sticky top-0 z-10 border-b border-line bg-surface/85 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-4xl items-center gap-2 px-3 sm:gap-4 sm:px-4">
+      <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-3 sm:gap-4 sm:px-4">
         <span className="flex shrink-0 items-center gap-2 text-sm font-semibold tracking-tight text-ink-900">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-ink-900 text-white">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">

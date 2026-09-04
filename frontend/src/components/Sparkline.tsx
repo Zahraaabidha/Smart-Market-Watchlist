@@ -13,11 +13,14 @@ export function Sparkline({
   path,
   width = 132,
   height = 40,
+  area = false,
   className,
 }: {
   path: PricePath;
   width?: number;
   height?: number;
+  /** Faint fill under the line — for the larger "while you were away" card. */
+  area?: boolean;
   className?: string;
 }) {
   const model = useMemo(() => {
@@ -44,6 +47,8 @@ export function Sparkline({
       pad + (1 - (v - min) / span) * (height - 2 * pad);
 
     const line = pts.map((p) => `${x(p.t)},${y(p.v)}`).join(" ");
+    const areaPath =
+      `${x(pts[0].t)},${height} ` + line + ` ${x(pts[pts.length - 1].t)},${height}`;
     const last = pts[pts.length - 1];
 
     // The extreme worth marking is whichever of high/low is further from the
@@ -62,6 +67,7 @@ export function Sparkline({
     const rising = last.v >= checkpoint;
     return {
       line,
+      areaPath,
       checkpointY: y(checkpoint),
       extreme: { cx: x(extreme.t), cy: y(extreme.v) },
       end: { cx: x(last.t), cy: y(last.v) },
@@ -96,6 +102,9 @@ export function Sparkline({
         } as React.CSSProperties
       }
     >
+      {area && (
+        <polygon points={model.areaPath} fill={stroke} opacity={0.08} />
+      )}
       {/* checkpoint reference: where the price stood when you last looked */}
       <line
         x1={0}

@@ -12,7 +12,7 @@ import {
 } from "@/format";
 import { Card, CardBody, SectionLabel, SeverityBadge, Skeleton } from "@/components/ui";
 import { companyName } from "@/universe";
-import { PricePathChart } from "./PricePathChart";
+import { BklitPathChart } from "./BklitPathChart";
 
 /**
  * The drill-in for one symbol. Shows the price path across the absence window
@@ -111,7 +111,7 @@ export function SymbolPath({
             />
           </div>
 
-          <PricePathChart detail={detail} />
+          <BklitPathChart detail={detail} />
 
           {/* why this matters — the signature explanation */}
           {swing && peakMove != null && endMove != null && (
