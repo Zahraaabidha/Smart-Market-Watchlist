@@ -22,6 +22,10 @@ services:
       ENVIRONMENT: development
       DEMO_MODE: "true"
       SECRET_KEY: ${SECRET_KEY:-insecure-demo-key-do-not-use-in-production}
+      # The image's own CMD binds to ${PORT:-10000} (Render sets PORT itself
+      # in production); pin it to 8000 here so it matches the port mapping
+      # below for local compose use.
+      PORT: "8000"
     ports:
       - "8000:8000"
     depends_on:

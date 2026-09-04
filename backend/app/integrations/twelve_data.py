@@ -168,8 +168,21 @@ class TwelveDataProvider(MarketDataProvider):
             ) from exc
 
         if response.status_code >= 400:
-            # Never str(exc)/response.text here — build the message from the
-            # status code alone.
+            # The vendor often puts the actually useful detail (bad symbol,
+            # plan restriction, quota) in a JSON body even on a 4xx/5xx --
+            # e.g. a 404 for a symbol not covered by the current plan. Use it
+            # when present; a raw response body that isn't JSON (a plain-text
+            # "Unauthorized", an HTML error page) falls back to the bare
+            # status so nothing unparsed is ever surfaced.
+            detail = None
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = None
+            if isinstance(error_body, dict) and error_body.get("message"):
+                detail = str(error_body["message"])[:200]
+            if detail:
+                raise MarketDataError(f"twelve data error: {detail}")
             raise MarketDataError(f"twelve data HTTP {response.status_code}")
 
         try:

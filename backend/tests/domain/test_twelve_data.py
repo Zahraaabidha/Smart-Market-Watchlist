@@ -106,6 +106,37 @@ def test_api_key_is_sent_as_a_header_never_in_the_url() -> None:
     assert seen["auth"] == "apikey SECRET123"
 
 
+def test_a_4xx_with_a_json_error_body_surfaces_the_vendor_message() -> None:
+    """A real symbol/plan-restriction error still returns HTTP 404 with a
+    JSON body explaining why (observed live: NSE symbols gated behind a
+    paid plan). That detail should reach `degraded_reason`, not just the
+    bare status code.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={
+                "code": 404,
+                "message": "This symbol is available starting with the Grow plan",
+                "status": "error",
+            },
+        )
+
+    provider = TwelveDataProvider(api_key="k", client=_client(handler))
+    with pytest.raises(MarketDataError, match="Grow plan"):
+        provider.fetch_current(["RELIANCE"], NOW)
+
+
+def test_a_4xx_with_a_non_json_body_falls_back_to_the_bare_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="<html>Internal Server Error</html>")
+
+    provider = TwelveDataProvider(api_key="k", client=_client(handler))
+    with pytest.raises(MarketDataError, match="twelve data HTTP 500"):
+        provider.fetch_current(["RELIANCE"], NOW)
+
+
 def test_error_messages_never_contain_the_api_key() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text="Unauthorized")
