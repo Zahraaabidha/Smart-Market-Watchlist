@@ -67,7 +67,8 @@ export function SignIn({
             away, why it surfaced, and whether the data can be trusted.
           </p>
           <p className="mt-4 text-xs text-white/60">
-            Deterministic replay market data. Not a live exchange feed.
+            Live market data when available, deterministic replay when it
+            isn&rsquo;t, and it always tells you which.
           </p>
         </div>
       </div>
