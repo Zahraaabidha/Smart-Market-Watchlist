@@ -85,8 +85,5 @@ npx playwright test
 
 https://groww-focus.vercel.app
 
-## Repository
-
-https://github.com/Zahraaabidha/Smart-Market-Watchlist
 
 Engineering decisions are documented in [docs/decisions.md](docs/decisions.md).
