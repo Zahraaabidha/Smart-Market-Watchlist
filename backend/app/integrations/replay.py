@@ -65,13 +65,21 @@ class SymbolProfile:
 # A small, varied default universe. Deliberately spans a calm large-cap, a
 # volatile mid-cap and a very quiet name so the ranking logic has something
 # real to discriminate between during a demo.
+#
+# RELIANCE and INFY sit a step above HDFCBANK/TCS on purpose: with only
+# ZOMATO markedly more volatile than the rest of the default watchlist, a
+# random demo window almost always surfaced ZOMATO alone. Nudging these two
+# into a second, moderate tier (still well under ZOMATO's) makes it commonly
+# join ZOMATO as meaningful while TCS and HDFCBANK stay calm often enough
+# that the quiet list still demonstrates filtering. This does not touch the
+# scoring engine, thresholds, or any other symbol's profile.
 DEFAULT_UNIVERSE: dict[str, SymbolProfile] = {
     p.symbol: p
     for p in [
-        SymbolProfile("RELIANCE", "2840.00", volatility=0.16, base_volume=4_200_000),
+        SymbolProfile("RELIANCE", "2840.00", volatility=0.26, base_volume=4_200_000),
         SymbolProfile("TCS", "3920.00", volatility=0.1, base_volume=1_800_000),
         SymbolProfile("HDFCBANK", "1685.00", volatility=0.13, base_volume=3_100_000),
-        SymbolProfile("INFY", "1540.00", volatility=0.14, base_volume=2_700_000),
+        SymbolProfile("INFY", "1540.00", volatility=0.26, base_volume=2_700_000),
         SymbolProfile("ZOMATO", "268.00", volatility=0.42, base_volume=9_400_000),
         SymbolProfile("ITC", "462.00", volatility=0.07, base_volume=2_200_000),
         SymbolProfile("TATAMOTORS", "985.00", volatility=0.3, base_volume=6_800_000),
