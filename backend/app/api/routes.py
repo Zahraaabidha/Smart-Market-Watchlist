@@ -19,7 +19,12 @@ from app.api import schemas
 from app.api.deps import current_user, utcnow
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    hash_password,
+    verify_google_id_token,
+    verify_password,
+)
 from app.integrations.replay import FailingProvider, ReplayProvider
 from app.persistence.db import get_session
 from app.persistence.models import MarketSnapshot, User, UserCheckpoint
@@ -74,13 +79,72 @@ def login(
     ).scalar_one_or_none()
 
     # One message and one code for both failure modes, so the endpoint cannot
-    # be used to discover which email addresses have accounts.
-    if user is None or not verify_password(payload.password, user.password_hash):
+    # be used to discover which email addresses have accounts. A Google-only
+    # account has no password_hash to check against -- it must fail the same
+    # way as a wrong password, not raise.
+    if (
+        user is None
+        or user.password_hash is None
+        or not verify_password(payload.password, user.password_hash)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid email or password",
         )
 
+    return schemas.TokenResponse(access_token=create_access_token(user.id))
+
+
+@auth_router.post("/google", response_model=schemas.TokenResponse)
+def google_login(
+    payload: schemas.GoogleAuthRequest, session: Session = Depends(get_session)
+) -> schemas.TokenResponse:
+    settings = get_settings()
+    if not settings.google_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google sign-in is not configured",
+        )
+
+    try:
+        claims = verify_google_id_token(payload.credential, settings.google_client_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid Google credential",
+        ) from exc
+
+    if not claims.get("email_verified") or not claims.get("email"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google account has no verified email",
+        )
+    email = claims["email"].lower()
+
+    user = session.execute(
+        select(User).where(User.email == email)
+    ).scalar_one_or_none()
+
+    if user is None:
+        # No password on a Google-created account: there is nothing for the
+        # password login path to ever match, by design (see login() above).
+        user = User(email=email, password_hash=None)
+        try:
+            with session.begin_nested():
+                session.add(user)
+                session.flush()
+        except IntegrityError:
+            # Lost a race with a concurrent signup for the same email -- load
+            # the row that won rather than creating a second account.
+            user = session.execute(
+                select(User).where(User.email == email)
+            ).scalar_one()
+        else:
+            wl.create_default_watchlist(session, user)
+
+    # An existing email/password account signing in with Google for the
+    # first time is linked by email rather than duplicated; it keeps working
+    # with its original password too.
     return schemas.TokenResponse(access_token=create_access_token(user.id))
 
 

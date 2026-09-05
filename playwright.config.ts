@@ -25,8 +25,10 @@ export default defineConfig({
   reporter: 'list',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('')`. */
-    baseURL: 'http://localhost:5173',
+    /* Base URL to use in actions like `await page.goto('')`. Overridable via
+       PW_BASE_URL so the same suite can run against a deployed environment,
+       e.g. PW_BASE_URL=https://groww-focus.vercel.app npx playwright test. */
+    baseURL: process.env.PW_BASE_URL || 'http://localhost:5173',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',

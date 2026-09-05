@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # Twelve Data qualifies Indian tickers by exchange (NSE / BSE).
     twelve_data_exchange: str = "NSE"
 
+    # Google Sign-In. Only the client id is needed server-side: it verifies
+    # ID tokens against Google's public keys, which requires no secret. When
+    # unset, /auth/google refuses requests instead of failing open.
+    google_client_id: str | None = None
+
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     @field_validator("secret_key")

@@ -7,9 +7,12 @@ the assertions. `app.state` is seeded by hand instead.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.deps import utcnow
 from app.core.security import create_access_token
 from app.main import MarketStatus, app
 from app.persistence.db import get_session
@@ -52,13 +55,29 @@ class TestDemoControls:
     def test_demo_replay_seeds_a_populated_brief(self, client, session, user):
         watchlist = wl.create_default_watchlist(session, user)
 
-        res = client.post("/api/demo/replay", headers=_auth(user))
-        assert res.status_code == 200
-        assert "checked_at" in res.json()
+        # `demo_replay` only guarantees *something* meaningful across its
+        # candidate windows (3h, 4h) *on average* -- both are deterministic
+        # given `now`, but which real-world instants land on a quiet stretch
+        # for a fresh watchlist's default symbols varies. Freezing `now` (for
+        # both the demo call and the brief read right after, so the brief's
+        # own window math sees the same instant the checkpoint was set
+        # against, not a multi-month real-clock gap) to a timestamp verified
+        # to surface a change makes this reproducible instead of occasionally
+        # failing depending on when the suite runs.
+        app.dependency_overrides[utcnow] = lambda: datetime(
+            2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc
+        )
+        try:
+            res = client.post("/api/demo/replay", headers=_auth(user))
+            assert res.status_code == 200
+            assert "checked_at" in res.json()
 
-        brief = client.get(
-            f"/api/watchlists/{watchlist.id}/brief", headers=_auth(user)
-        ).json()
+            brief = client.get(
+                f"/api/watchlists/{watchlist.id}/brief", headers=_auth(user)
+            ).json()
+        finally:
+            del app.dependency_overrides[utcnow]
+
         assert brief["monitored_count"] >= 5
         assert brief["market_source"] == "replay"
         # Something moved across a 3h replay window.

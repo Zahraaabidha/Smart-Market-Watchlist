@@ -29,6 +29,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=PASSWORD_MAX)
 
 
+class GoogleAuthRequest(BaseModel):
+    # The GIS "credential" is a signed ID token JWT, not an OAuth code -- it
+    # is verified server-side and never trusted as-is.
+    credential: str = Field(min_length=1)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

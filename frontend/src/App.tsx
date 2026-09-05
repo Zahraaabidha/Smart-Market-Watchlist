@@ -115,6 +115,20 @@ export default function App() {
     }
   }
 
+  async function handleGoogleAuth(credential: string) {
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      const result = await api.googleLogin(credential);
+      setToken(result.access_token);
+      setAuthed(true);
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Google sign-in failed.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
   async function mutate(action: () => Promise<unknown>) {
     setBusy(true);
     setError(null);
@@ -198,6 +212,7 @@ export default function App() {
     return (
       <SignIn
         onSubmit={handleAuth}
+        onGoogleCredential={handleGoogleAuth}
         error={authError}
         busy={authBusy}
         onModeChange={() => setAuthError(null)}

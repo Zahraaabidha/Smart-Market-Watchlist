@@ -1,9 +1,11 @@
-"""Password hashing and access tokens."""
+"""Password hashing, access tokens, and Google ID token verification."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -58,3 +60,21 @@ def decode_access_token(token: str) -> int | None:
         return int(subject)
     except (TypeError, ValueError):
         return None
+
+
+# One shared HTTP transport for verifying Google ID tokens. google-auth uses
+# it to fetch and cache Google's public keys rather than one per request.
+_google_request = google_requests.Request()
+
+
+def verify_google_id_token(token: str, client_id: str) -> dict:
+    """Verify a Google Identity Services credential and return its claims.
+
+    Delegates signature, issuer, expiry, and audience checks to google-auth
+    rather than reimplementing JWKS handling -- this is the one place where
+    getting verification subtly wrong lets an attacker forge a session.
+    Raises ValueError (via the underlying library) for any invalid token.
+    """
+    return google_id_token.verify_oauth2_token(
+        token, _google_request, audience=client_id
+    )

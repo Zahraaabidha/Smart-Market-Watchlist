@@ -53,7 +53,10 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Null for an account that has only ever signed in with Google -- there is
+    # no password to check, so the password login path must treat null as
+    # "this credential can never match" rather than crashing.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TS, server_default=func.now())
 
     # Attention preferences live on the user rather than in a settings table.

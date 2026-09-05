@@ -259,8 +259,16 @@ test('full product flow: sign in through Brief, SymbolPath, History, Watchlist, 
     expect(box).not.toBeNull();
     let valueAfterClick: string | null = null;
     if (box) {
+      // Wait for the actual PATCH to land rather than a fixed timeout: the
+      // click updates the slider's local state immediately, but "survives
+      // reload" is only true once the commit request has actually completed
+      // -- a fixed short wait is exactly the kind of race that makes a test
+      // flaky under load without saying anything real about the app.
+      const commitResponse = page.waitForResponse(
+        (r) => r.url().includes('/api/preferences') && r.request().method() === 'PATCH',
+      );
       await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
-      await page.waitForTimeout(300);
+      await commitResponse;
       valueAfterClick = await slider.getAttribute('value');
     }
 

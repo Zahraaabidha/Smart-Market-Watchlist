@@ -97,6 +97,12 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
+  googleLogin: (credential: string) =>
+    request<{ access_token: string }>("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ credential }),
+    }),
+
   me: () => request<{ id: number; email: string }>("/auth/me"),
 
   watchlists: () => request<Watchlist[]>("/watchlists"),
