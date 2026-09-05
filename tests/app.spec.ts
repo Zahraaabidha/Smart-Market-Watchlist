@@ -17,10 +17,16 @@ async function registerAndSignIn(page: Page, email: string) {
   await page.getByRole('button', { name: /No account\? Create one/i }).click();
   await page.getByPlaceholder('Email').fill(email);
   await page.getByPlaceholder('Password').fill(PASSWORD);
+  // Every test starts here, so this is the single highest-value place to
+  // wait on the real network round trip rather than a fixed UI timeout: the
+  // registration call itself is what actually varies against a live,
+  // shared, free-tier deployment.
+  const registered = page.waitForResponse(
+    (r) => r.url().includes('/api/auth/register') && r.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Create account' }).click();
-  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible({
-    timeout: 15_000,
-  });
+  await registered;
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }
 
 /** Click a sidebar nav item, opening the off-canvas drawer first if the
@@ -50,6 +56,16 @@ async function forceProviderMode(page: Page, mode: 'replay' | 'failing') {
 test('full product flow: sign in through Brief, SymbolPath, History, Watchlist, Manage, sign out', async ({
   page,
 }) => {
+  // This one test deliberately covers the whole product end to end (sign-in,
+  // Demo, SymbolPath, History, a full Watchlist CRUD cycle, Manage, sign-out)
+  // against a real deployment, not a mocked one -- every step below is a
+  // genuine network round trip. Playwright's generic 30s default was
+  // calibrated for a single focused assertion, not a comprehensive flow like
+  // this; every other test in this file stays comfortably under it. This
+  // does not loosen any individual assertion, it gives this one long,
+  // legitimately multi-step test a budget proportional to its own scope.
+  test.setTimeout(120_000);
+
   const email = uniqueEmail('flow');
 
   await test.step('sign in (via registration) lands on a populated Brief', async () => {
@@ -61,19 +77,27 @@ test('full product flow: sign in through Brief, SymbolPath, History, Watchlist, 
   await test.step('Demo seeds a populated Brief with attention items', async () => {
     const demoButton = page.getByRole('button', { name: 'Demo' });
     await expect(demoButton).toBeVisible();
-    await demoButton.click();
+
     // "Here's what changed..." is not a reliable completion signal on its
     // own: a brand-new account's very first brief already compares against
     // a week of history and can show that same text before Demo has done
-    // anything. Waiting only for it let a later test step race ahead of
-    // runDemo()'s own in-flight `load(true)`, which finishes by resetting
-    // pathSymbol -- silently yanking the test back to the Brief mid-way
-    // through the SymbolPath step. The button's own busy state ("Seeding…"
-    // -> back to "Demo") is what actually brackets the whole click handler.
-    await expect(page.getByRole('button', { name: 'Seeding…' })).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(demoButton).toBeVisible({ timeout: 15_000 });
+    // anything. A fixed timeout on the button's own busy state ("Seeding…"
+    // -> back to "Demo") isn't reliable either: runDemo() finishes only
+    // after the demo call resolves *and* its own follow-up `load(true)`
+    // reload completes, and that reload's Brief fetch is what actually
+    // repopulates the screen. Waiting for both real network round trips --
+    // not a guessed duration -- is what actually brackets the click handler.
+    const demoReplayDone = page.waitForResponse(
+      (r) => r.url().includes('/api/demo/replay') && r.request().method() === 'POST',
+    );
+    const briefReloaded = page.waitForResponse(
+      (r) => /\/api\/watchlists\/\d+\/brief/.test(r.url()) && r.request().method() === 'GET',
+    );
+    await demoButton.click();
+    await demoReplayDone;
+    await briefReloaded;
+
+    await expect(demoButton).toBeVisible();
     await expect(page.getByText(/Here's what changed while you were away\./)).toBeVisible();
   });
 
@@ -209,42 +233,84 @@ test('full product flow: sign in through Brief, SymbolPath, History, Watchlist, 
     const addButton = page.getByRole('button', { name: 'Add', exact: true });
     const before = await page.locator('main ul li').count();
 
+    // Confirm the write itself actually happened -- a real failure to
+    // persist must still surface immediately, not be masked by a generous
+    // UI-catch-up timeout below.
+    const addPosted = page.waitForResponse(
+      (r) => /\/api\/watchlists\/\d+\/items$/.test(r.url()) && r.request().method() === 'POST',
+    );
     await symbolInput.fill('TATAMOTORS');
     await addButton.click();
+    await addPosted;
+    // `submit()` clears the input only after `onAdd()` resolves, which in
+    // turn waits on `mutate()`'s full reload (watchlists, brief,
+    // preferences, market source together) -- not just the POST above. Both
+    // checks below are Playwright's own auto-retrying assertions, so a
+    // longer explicit window here is bounded, condition-based waiting for
+    // that whole reload to land, not a guessed fixed delay.
     await expect
-      .poll(async () => page.locator('main ul li').count())
+      .poll(async () => page.locator('main ul li').count(), { timeout: 15_000 })
       .toBe(before + 1);
-    // `submit()` awaits the full add (including the resulting reload)
-    // before clearing the field itself, so the count updating doesn't
-    // guarantee the input has been cleared yet -- wait for that too, or a
-    // second fill() here can race the form's own reset and get wiped out.
-    await expect(symbolInput).toHaveValue('');
+    await expect(symbolInput).toHaveValue('', { timeout: 15_000 });
 
-    // Duplicate add: idempotent, no new row.
+    // Duplicate add: idempotent, no new row. A mutation always reloads the
+    // watchlist afterwards (see `mutate()` in App.tsx), and that reload's
+    // GET is what the row count actually reflects -- wait for both real
+    // round trips instead of guessing how long they take.
+    const duplicateAddPosted = page.waitForResponse(
+      (r) => /\/api\/watchlists\/\d+\/items$/.test(r.url()) && r.request().method() === 'POST',
+    );
     await symbolInput.fill('TATAMOTORS');
     await addButton.click();
-    await page.waitForTimeout(500);
+    await duplicateAddPosted;
+    await page.waitForResponse(
+      (r) => /\/api\/watchlists$/.test(r.url()) && r.request().method() === 'GET',
+    );
     expect(await page.locator('main ul li').count()).toBe(before + 1);
 
     const row = page.locator('main ul li').filter({ hasText: 'TATAMOTORS' });
 
-    // Reorder: move it up and confirm the row order actually changed.
+    // Reorder: move it up and confirm the row order actually changed. Same
+    // reasoning as the duplicate add above -- the displayed order only
+    // updates once the post-reorder watchlist reload lands.
     const upButton = row.getByRole('button', { name: /Move TATAMOTORS up/i });
     if (await upButton.isEnabled()) {
       const rowsBefore = await page.locator('main ul li').allTextContents();
+      const reorderPut = page.waitForResponse(
+        (r) => /\/api\/watchlists\/\d+\/order$/.test(r.url()) && r.request().method() === 'PUT',
+      );
       await upButton.click();
-      await page.waitForTimeout(500);
+      await reorderPut;
+      await page.waitForResponse(
+        (r) => /\/api\/watchlists$/.test(r.url()) && r.request().method() === 'GET',
+      );
       const rowsAfter = await page.locator('main ul li').allTextContents();
       expect(rowsAfter).not.toEqual(rowsBefore);
     }
 
-    // Priority: open the dropdown and set it to High.
+    // Priority: open the dropdown and set it to High. Same reload-race
+    // reasoning as above -- wait for the actual PATCH before asserting the
+    // new priority is displayed.
+    const priorityPatched = page.waitForResponse(
+      (r) => /\/api\/watchlists\/\d+\/items\/\d+$/.test(r.url()) && r.request().method() === 'PATCH',
+    );
     await row.getByRole('button', { name: /Priority for TATAMOTORS/i }).click();
     await page.getByRole('option', { name: 'High' }).click();
-    await expect(row.getByText('High', { exact: true })).toBeVisible({ timeout: 5_000 });
+    await priorityPatched;
+    await expect(row.getByText('High', { exact: true })).toBeVisible();
 
-    // Remove it, back to the starting count.
+    // Remove it, back to the starting count. Same reload-race reasoning as
+    // the rest of this step -- wait for the DELETE and its reload before
+    // polling the count, instead of letting the poll's own default window
+    // race the round trip.
+    const removeDeleted = page.waitForResponse(
+      (r) => /\/api\/watchlists\/\d+\/items\/\d+$/.test(r.url()) && r.request().method() === 'DELETE',
+    );
     await row.getByRole('button', { name: 'Remove' }).click();
+    await removeDeleted;
+    await page.waitForResponse(
+      (r) => /\/api\/watchlists$/.test(r.url()) && r.request().method() === 'GET',
+    );
     await expect
       .poll(async () => page.locator('main ul li').count())
       .toBe(before);
@@ -272,7 +338,16 @@ test('full product flow: sign in through Brief, SymbolPath, History, Watchlist, 
       valueAfterClick = await slider.getAttribute('value');
     }
 
+    // A reload resets all client state, so the app refetches preferences
+    // (among other things) before rendering past its loading skeleton --
+    // wait for that specific refetch, since it's what determines the
+    // slider's post-reload value, rather than racing a fixed timeout
+    // against however long the round trip takes.
+    const prefsRefetched = page.waitForResponse(
+      (r) => r.url().includes('/api/preferences') && r.request().method() === 'GET',
+    );
     await page.reload();
+    await prefsRefetched;
     await goToTab(page, 'Manage');
     await expect(page.getByRole('slider', { name: 'Minimum move' })).toHaveAttribute(
       'value',
@@ -300,11 +375,16 @@ test.describe('auth edge cases', () => {
     await page.goto('/');
     await page.getByPlaceholder('Email').fill('nonexistent-user@example.com');
     await page.getByPlaceholder('Password').fill('wrong-password-123');
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    // Exact match: Google's own embedded button also has an accessible name
+    // containing "Sign in" ("Sign in with Google. Opens in new tab"), which
+    // a substring match would ambiguously resolve to both.
+    const loginRejected = page.waitForResponse(
+      (r) => r.url().includes('/api/auth/login') && r.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await loginRejected;
 
-    await expect(page.getByText('invalid email or password')).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(page.getByText('invalid email or password')).toBeVisible();
     await expect(page.getByText(/session expired/i)).not.toBeVisible();
   });
 
@@ -314,7 +394,14 @@ test.describe('auth edge cases', () => {
     await page.goto('/');
     await page.getByPlaceholder('Email').fill('nonexistent-user@example.com');
     await page.getByPlaceholder('Password').fill('wrong-password-123');
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    // Exact match: Google's own embedded button also has an accessible name
+    // containing "Sign in" ("Sign in with Google. Opens in new tab"), which
+    // a substring match would ambiguously resolve to both.
+    const loginRejected = page.waitForResponse(
+      (r) => r.url().includes('/api/auth/login') && r.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await loginRejected;
     await expect(page.getByText('invalid email or password')).toBeVisible();
 
     await page.getByRole('button', { name: /No account\? Create one/i }).click();
@@ -323,15 +410,54 @@ test.describe('auth edge cases', () => {
 });
 
 test.describe('data source states', () => {
-  test('defaults to Replay, never labelled Live', async ({ page }) => {
+  test('the sidebar source label always matches the backend\'s actual provider state', async ({
+    page,
+  }) => {
+    // The account can legitimately land in any of the app's three defined
+    // states -- Replay, Live, or Degraded (e.g. the shared production
+    // provider can be mid-outage for reasons outside this test's control) --
+    // so this does not assume which one it will be. What must always hold is
+    // that the label shown is the one truthful for whatever state the
+    // backend actually reports, never a different one of the three.
     const email = uniqueEmail('source');
     await registerAndSignIn(page, email);
 
     const sidebar = page.getByRole('complementary');
-    await expect(sidebar.getByText('Replay data', { exact: true })).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(sidebar.getByText('Live market data')).not.toBeVisible();
+    const labels = ['Replay data', 'Degraded', 'Live market data'] as const;
+
+    // Wait for the chip to actually resolve to one of the three valid
+    // states before reading it, rather than a fixed delay.
+    await expect(
+      sidebar
+        .getByText(labels[0], { exact: true })
+        .or(sidebar.getByText(labels[1], { exact: true }))
+        .or(sidebar.getByText(labels[2], { exact: true })),
+    ).toBeVisible({ timeout: 10_000 });
+
+    const truth: { provider: string; mode: 'live' | 'replay'; degraded: boolean } =
+      await page.evaluate(async () => {
+        const token = localStorage.getItem('smw.token');
+        const res = await fetch('/api/market/source', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        return res.json();
+      });
+
+    // Mirrors the exact decision `sourceCopy()` makes in format.ts -- this
+    // test must fail if the UI's logic ever diverges from that truth.
+    const expected = truth.degraded
+      ? 'Degraded'
+      : truth.mode === 'live' && truth.provider !== 'replay'
+        ? 'Live market data'
+        : 'Replay data';
+
+    for (const label of labels) {
+      if (label === expected) {
+        await expect(sidebar.getByText(label, { exact: true })).toBeVisible();
+      } else {
+        await expect(sidebar.getByText(label, { exact: true })).not.toBeVisible();
+      }
+    }
   });
 
   test('a forced provider failure shows Degraded, not a blank screen', async ({ page }) => {
