@@ -4,6 +4,7 @@ import {
   durationBetween,
   freshnessHelp,
   freshnessLabel,
+  isSimulatedSource,
   price,
   relativeTime,
   signedPct,
@@ -43,7 +44,7 @@ export function MarketBrief({
   const notableCount = n - highCount;
   const src = sourceCopy({
     provider: brief.market_source,
-    mode: "replay",
+    mode: isSimulatedSource(brief.market_source) ? "replay" : "live",
     degraded: brief.degraded,
   });
   const strongest = attention[0];

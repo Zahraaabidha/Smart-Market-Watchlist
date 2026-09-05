@@ -6,6 +6,7 @@ import {
   durationBetween,
   freshnessHelp,
   freshnessLabel,
+  isSimulatedSource,
   price,
   relativeTime,
   signedPct,
@@ -172,7 +173,7 @@ export function SymbolPath({
                 {(() => {
                   const s = sourceCopy({
                     provider: detail.source,
-                    mode: "replay",
+                    mode: isSimulatedSource(detail.source) ? "replay" : "live",
                     degraded: false,
                   });
                   return (

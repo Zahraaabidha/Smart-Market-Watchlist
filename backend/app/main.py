@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.api.routes import router
 from app.core.config import Settings, get_settings
@@ -139,6 +140,14 @@ def _run_one_pass(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    # Schema-drift repair: `password_hash` was NOT NULL when the users table
+    # was first created. Google Sign-In later needed password-less accounts
+    # and the model changed to nullable, but `create_all` never alters an
+    # existing table, so a database provisioned before that change still
+    # enforces the old constraint -- crashing every first-time Google sign-in
+    # with an IntegrityError. A no-op once the column is already nullable.
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL"))
     app.state.provider = provider
     app.state.market_status = MarketStatus(
         mode=getattr(provider, "name", "replay")

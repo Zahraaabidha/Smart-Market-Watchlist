@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
@@ -33,20 +33,26 @@ export function SignIn({
     "placeholder:text-ink-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25";
 
   const shownError = error ?? googleError;
+  const reducedMotion = usePrefersReducedMotion();
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
       {/* Left: the one-line pitch, over a full-bleed video. The footage is
-          dark, so white text sits directly on it with no scrim needed. */}
-      <div className="relative hidden flex-col justify-between overflow-hidden border-r border-line p-12 lg:flex">
-        <video
-          src="/login_vid.mp4"
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+          dark, so white text sits directly on it with no scrim needed. The
+          panel's own background is black so there is never a white flash
+          before the video has a frame to paint -- it just paints over the
+          black once ready, with no separate poster or transition needed. */}
+      <div className="relative hidden flex-col justify-between overflow-hidden border-r border-line bg-black p-12 lg:flex">
+        {!reducedMotion && (
+          <video
+            src="/login_vid.mp4"
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
 
         <div className="relative flex items-center gap-2 text-sm font-semibold text-white">
           <Mark />
@@ -236,4 +242,27 @@ function EyeIcon({ open }: { open: boolean }) {
       <path d="M2.5 2.5l11 11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
+}
+
+/**
+ * Reads the media query synchronously on first render (not in an effect) so
+ * a reduced-motion viewer never gets a single frame of the video mounting
+ * before this flips it off -- the panel's black background is the only
+ * thing they see, from the very first paint.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduced(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  return reduced;
 }

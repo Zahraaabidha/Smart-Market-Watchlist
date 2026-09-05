@@ -83,14 +83,20 @@ export function leadReason(
   return top ? shortReason(top.code) : null;
 }
 
+/** True when a source name denotes simulated data rather than a live vendor. */
+export function isSimulatedSource(source: string): boolean {
+  return source === "replay" || source === "failing";
+}
+
 /**
  * Freshness copy. The headline label is decided by the data *source* first:
  * replay data is never called "Live" no matter how recent, because it is not a
  * live market. `age` copy still applies to a real live feed.
  */
 export function freshnessLabel(freshness: Freshness, source: string): string {
-  const isSimulated = source === "replay" || source === "failing";
-  if (isSimulated) return freshness === "stale" ? "Replay · stale" : "Replay data";
+  if (isSimulatedSource(source)) {
+    return freshness === "stale" ? "Replay · stale" : "Replay data";
+  }
   return { fresh: "Live", delayed: "Delayed", stale: "Stale" }[freshness];
 }
 
